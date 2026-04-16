@@ -1,0 +1,15 @@
+{
+  "name": "desktop-panel",
+  "version": "1.0.0",
+  "description": "Desktop floating panel built with Electron",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^31.7.7"
+  },
+  "dependencies": {
+    "windows-shortcuts": "^0.1.6"
+  }
+}

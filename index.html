@@ -1,0 +1,120 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Desktop Panel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell" id="appShell">
+    <div class="window-top-sensor no-drag" id="windowTopSensor"></div>
+    <div class="window-drag-handle" id="windowDragHandle" title="按住可拖拽窗口">
+      <div class="drag-hint">
+        <span class="corner tl"></span>
+        <span class="corner tr"></span>
+        <span class="corner bl"></span>
+        <span class="corner br"></span>
+        <p>鼠标放置此区域，即可拖动窗口</p>
+      </div>
+    </div>
+
+    <main class="workspace" id="workspace">
+      <section id="groups" class="groups"></section>
+    </main>
+  </div>
+
+  <dialog id="addDialog" class="dialog">
+    <form method="dialog" id="addForm" class="dialog-form">
+      <h2>添加图标</h2>
+
+      <label>
+        名称
+        <input name="title" type="text" maxlength="24" placeholder="例如：知乎" required />
+      </label>
+
+      <label>
+        地址
+        <input name="url" type="url" placeholder="https://www.zhihu.com" required />
+      </label>
+
+      <label>
+        分组
+        <select name="groupId" id="groupSelect"></select>
+      </label>
+
+      <menu>
+        <button value="cancel" type="button" id="cancelAddDialog">取消</button>
+        <button value="default" type="submit" class="primary">保存</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDialog" class="dialog">
+    <form method="dialog" id="settingsForm" class="dialog-form">
+      <h2>软件设置</h2>
+
+      <label>
+        基础图标大小
+        <input id="iconSizeInput" name="iconSize" type="range" min="42" max="76" step="2" />
+      </label>
+
+      <label>
+        图标间距
+        <input id="gapInput" name="gap" type="range" min="8" max="24" step="1" />
+      </label>
+
+      <label class="checkbox">
+        <input id="showGroupTitleInput" name="showGroupTitle" type="checkbox" />
+        显示组名
+      </label>
+
+      <label class="checkbox">
+        <input id="snapEdgeInput" name="snapEdge" type="checkbox" />
+        窗口边缘吸附
+      </label>
+
+      <div class="settings-actions">
+        <button id="autoGroupButton" type="button">自动分组</button>
+        <button id="minWindow" type="button">最小化</button>
+        <button id="closeWindow" type="button">关闭窗口</button>
+      </div>
+
+      <menu>
+        <button value="cancel" type="button" id="cancelSettingsDialog">关闭</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <div id="appContextMenu" class="context-menu" hidden>
+    <button type="button" data-action="open-settings">软件设置</button>
+    <button type="button" data-action="add-icon">添加图标</button>
+    <button type="button" data-action="toggle-snap">切换边缘吸附</button>
+    <button type="button" data-action="window-small">窗口小</button>
+    <button type="button" data-action="window-medium">窗口中</button>
+    <button type="button" data-action="window-large">窗口大</button>
+  </div>
+
+  <div id="itemContextMenu" class="context-menu" hidden>
+    <button type="button" data-action="size-1x1">占位 1x1</button>
+    <button type="button" data-action="size-1x2">占位 1x2</button>
+    <button type="button" data-action="size-2x2">占位 2x2</button>
+    <button type="button" data-action="delete-item">删除</button>
+  </div>
+
+  <template id="itemTemplate">
+    <article class="tile no-drag" draggable="true" data-size="1x1">
+      <button class="delete" type="button" title="删除">×</button>
+      <div class="icon-wrap">
+        <img alt="" class="icon" loading="lazy" referrerpolicy="no-referrer" />
+      </div>
+      <p class="label"></p>
+    </article>
+  </template>
+
+  <script src="./script.js"></script>
+</body>
+</html>
