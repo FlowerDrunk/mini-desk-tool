@@ -8,10 +8,12 @@ const WINDOW_MARGIN_TOP = 0;
 const WINDOW_MARGIN_RIGHT = 16;
 const MIN_WIDTH = 320;
 const MIN_HEIGHT = 460;
-const ICONFONT_RESULT_LIMIT = 4;
+const ICONFONT_RESULT_LIMIT = 12;
 const ICONFONT_POLL_MS = 400;
 const ICONFONT_TIMEOUT_MS = 12000;
 const OFFICIAL_SEARCH_LIMIT = 6;
+const TAVILY_SEARCH_URL = "https://api.tavily.com/search";
+const BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search";
 const ICONFONT_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const SNAP_DISTANCE = 14;
@@ -384,7 +386,101 @@ function scoreHao123Candidate(candidate, query) {
   return score;
 }
 
-async function searchOfficialUrl(query) {
+function buildOfficialCandidate(url, title = "", snippet = "") {
+  try {
+    const parsed = new URL(String(url || "").trim());
+    if (isBlockedOfficialHost(parsed.hostname, parsed.pathname)) return null;
+    return {
+      url: parsed.toString(),
+      title: String(title || "").trim(),
+      snippet: String(snippet || "").trim(),
+      hostname: parsed.hostname,
+      protocol: parsed.protocol,
+      pathname: parsed.pathname,
+      pathDepth: parsed.pathname.split("/").filter(Boolean).length
+    };
+  } catch {
+    return null;
+  }
+}
+
+function rankOfficialCandidates(candidates, query) {
+  return candidates
+    .map((candidate) => ({ ...candidate, score: scoreHao123Candidate(candidate, query) }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, OFFICIAL_SEARCH_LIMIT);
+}
+
+async function searchOfficialUrlWithTavily(query) {
+  const apiKey = String(process.env.TAVILY_API_KEY || "").trim();
+  if (!apiKey) return "";
+
+  try {
+    const response = await fetch(TAVILY_SEARCH_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        query: `${query} 官网 官方网站 official website`,
+        topic: "general",
+        search_depth: "advanced",
+        max_results: OFFICIAL_SEARCH_LIMIT,
+        include_answer: false,
+        include_raw_content: false,
+        include_images: false,
+        include_favicon: false
+      })
+    });
+
+    if (!response.ok) return "";
+    const data = await response.json();
+    const candidates = Array.isArray(data?.results)
+      ? data.results
+          .map((item) => buildOfficialCandidate(item?.url, item?.title, item?.content))
+          .filter(Boolean)
+      : [];
+
+    return rankOfficialCandidates(candidates, query)[0]?.url || "";
+  } catch {
+    return "";
+  }
+}
+
+async function searchOfficialUrlWithBrave(query) {
+  const apiKey = String(process.env.BRAVE_SEARCH_API_KEY || "").trim();
+  if (!apiKey) return "";
+
+  try {
+    const response = await fetch(`${BRAVE_SEARCH_URL}?${new URLSearchParams({
+      q: `${query} 官网 官方网站 official website`,
+      count: String(OFFICIAL_SEARCH_LIMIT),
+      country: "CN",
+      search_lang: "zh-hans"
+    })}`, {
+      headers: {
+        accept: "application/json",
+        "accept-encoding": "gzip",
+        "x-subscription-token": apiKey
+      }
+    });
+
+    if (!response.ok) return "";
+    const data = await response.json();
+    const rawResults = Array.isArray(data?.web?.results) ? data.web.results : [];
+    const candidates = rawResults
+      .map((item) => buildOfficialCandidate(item?.url, item?.title, item?.description))
+      .filter(Boolean);
+
+    return rankOfficialCandidates(candidates, query)[0]?.url || "";
+  } catch {
+    return "";
+  }
+}
+
+async function searchOfficialUrlWithHao123(query) {
   const keyword = typeof query === "string" ? query.trim() : "";
   if (!keyword) return "";
 
@@ -399,21 +495,7 @@ async function searchOfficialUrl(query) {
         const url = decodeHtml(match[1]).trim();
         const title = decodeHtml(match[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
         if (!url || !title || title.length > 24) return null;
-
-        try {
-          const parsed = new URL(url);
-          if (isBlockedOfficialHost(parsed.hostname, parsed.pathname)) return null;
-          return {
-            url: parsed.toString(),
-            title,
-            hostname: parsed.hostname,
-            protocol: parsed.protocol,
-            pathname: parsed.pathname,
-            pathDepth: parsed.pathname.split("/").filter(Boolean).length
-          };
-        } catch {
-          return null;
-        }
+        return buildOfficialCandidate(url, title, "");
       })
       .filter(Boolean);
 
@@ -423,16 +505,23 @@ async function searchOfficialUrl(query) {
       new Map(results.map((item) => [`${item.title}|${item.hostname}`, item])).values()
     );
 
-    const ranked = uniqueResults
-      .map((candidate) => ({ ...candidate, score: scoreHao123Candidate(candidate, keyword) }))
-      .filter((candidate) => candidate.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, OFFICIAL_SEARCH_LIMIT);
-
-    return ranked[0]?.url || "";
+    return rankOfficialCandidates(uniqueResults, keyword)[0]?.url || "";
   } catch {
     return "";
   }
+}
+
+async function searchOfficialUrl(query) {
+  const keyword = typeof query === "string" ? query.trim() : "";
+  if (!keyword) return "";
+
+  const tavilyUrl = await searchOfficialUrlWithTavily(keyword);
+  if (tavilyUrl) return tavilyUrl;
+
+  const braveUrl = await searchOfficialUrlWithBrave(keyword);
+  if (braveUrl) return braveUrl;
+
+  return searchOfficialUrlWithHao123(keyword);
 }
 
 async function extractIconfontCandidates(win, limit = ICONFONT_RESULT_LIMIT) {

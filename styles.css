@@ -71,36 +71,13 @@ dialog {
   padding: var(--workspace-top-padding) 10px 10px;
   overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(137, 199, 255, 0.82) rgba(255, 255, 255, 0.08);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .workspace::-webkit-scrollbar {
-  width: var(--scrollbar-size);
-}
-
-.workspace::-webkit-scrollbar-track {
-  margin: 8px 0;
-  border-radius: 999px;
-  background: var(--scrollbar-track);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-}
-
-.workspace::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  border: 2px solid transparent;
-  background: var(--scrollbar-thumb);
-  background-clip: padding-box;
-  box-shadow: 0 6px 14px rgba(12, 25, 40, 0.34);
-}
-
-.workspace::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
-  background-clip: padding-box;
-}
-
-.workspace::-webkit-scrollbar-corner {
-  background: transparent;
+  width: 0;
+  height: 0;
 }
 
 .workspace::before {
@@ -265,9 +242,13 @@ dialog {
   width: var(--item-icon-size, var(--icon-size));
   height: var(--item-icon-size, var(--icon-size));
   border-radius: 16px;
-  object-fit: cover;
+  object-fit: contain;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
-  background: rgba(255, 255, 255, 0.95);
+  background:
+    radial-gradient(circle at 28% 22%, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.06) 52%, rgba(170, 192, 216, 0.04) 100%),
+    linear-gradient(180deg, rgba(236, 242, 250, 0.22), rgba(205, 217, 232, 0.12));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 6px;
 }
 
 .label {
@@ -295,19 +276,23 @@ dialog {
 
 .delete {
   position: absolute;
-  top: -3px;
-  right: 0;
-  width: 18px;
-  height: 18px;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
   border: 0;
   border-radius: 999px;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1;
   background: rgba(0, 0, 0, 0.6);
   color: #fff;
   cursor: pointer;
   opacity: 0;
   transition: opacity .15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
 }
 
 .tile:hover .delete {
@@ -428,6 +413,15 @@ dialog {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 250, 255, 0.92));
   color: #11202b;
   padding: 20px;
+  max-height: min(82vh, 720px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.dialog-form::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .dialog-form h2 {
@@ -501,6 +495,33 @@ select:focus {
   color: #6a8092;
 }
 
+.icon-picker-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.icon-refresh-button {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(33, 123, 255, 0.1);
+  color: #2b6fd6;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, opacity .15s ease;
+}
+
+.icon-refresh-button:hover:not(:disabled) {
+  background: rgba(33, 123, 255, 0.16);
+}
+
+.icon-refresh-button:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
 .icon-suggestion-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -535,6 +556,11 @@ select:focus {
   border-color: rgba(31, 124, 255, 0.72);
   background: linear-gradient(180deg, rgba(225, 240, 255, 0.96), rgba(243, 248, 255, 0.96));
   box-shadow: 0 0 0 3px rgba(80, 147, 255, 0.14);
+}
+
+.icon-suggestion-card.is-original {
+  background: linear-gradient(180deg, rgba(246, 250, 255, 0.98), rgba(233, 241, 251, 0.94));
+  border-style: dashed;
 }
 
 .icon-suggestion-card img {

@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
@@ -41,7 +41,10 @@
       <section class="icon-picker">
         <div class="icon-picker-head">
           <strong>图标候选</strong>
-          <span id="addIconSearchStatus" class="icon-picker-status">输入描述后自动搜索</span>
+          <div class="icon-picker-actions">
+            <span id="addIconSearchStatus" class="icon-picker-status">输入描述后自动搜索</span>
+            <button type="button" id="addRefreshIconsButton" class="icon-refresh-button">换一批</button>
+          </div>
         </div>
         <div id="addIconSuggestions" class="icon-suggestion-grid"></div>
       </section>
@@ -92,7 +95,7 @@
 
       <label>
         每排数量
-        <input id="trackCountInput" name="trackCount" type="range" min="2" max="6" step="1" />
+        <input id="trackCountInput" name="trackCount" type="range" min="1" max="4" step="1" />
       </label>
       <p id="trackCountHint" class="field-hint">当前每排显示 3 个图标</p>
 
@@ -103,7 +106,6 @@
 
       <div class="settings-actions">
         <button id="autoGroupButton" type="button">自动分组</button>
-        <button id="minWindow" type="button">最小化</button>
         <button id="closeWindow" type="button">关闭窗口</button>
       </div>
 
@@ -158,7 +160,10 @@
       <section class="icon-picker">
         <div class="icon-picker-head">
           <strong>图标候选</strong>
-          <span id="editIconSearchStatus" class="icon-picker-status">根据描述显示 4 个候选图标</span>
+          <div class="icon-picker-actions">
+            <span id="editIconSearchStatus" class="icon-picker-status">根据描述显示 4 个候选图标</span>
+            <button type="button" id="editRefreshIconsButton" class="icon-refresh-button">换一批</button>
+          </div>
         </div>
         <div id="editIconSuggestions" class="icon-suggestion-grid"></div>
       </section>
@@ -180,8 +185,6 @@
   <div id="appContextMenu" class="context-menu" hidden>
     <button type="button" data-action="add-icon" class="menu-accent"><span>添加图标</span></button>
     <button type="button" data-action="open-settings"><span>软件设置</span></button>
-    <div class="menu-divider" role="separator"></div>
-    <button type="button" data-action="toggle-snap"><span>切换边缘吸附</span></button>
   </div>
 
   <div id="dragToast" class="drag-toast" hidden></div>
