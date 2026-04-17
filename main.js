@@ -3,32 +3,37 @@ const path = require("path");
 const { execFile } = require("child_process");
 const ws = require("windows-shortcuts");
 
-const DEFAULT_WIDTH = 434;
-const DEFAULT_HEIGHT = 640;
+const DEFAULT_WIDTH = 360;
+const WINDOW_MARGIN_TOP = 0;
+const WINDOW_MARGIN_RIGHT = 16;
 const MIN_WIDTH = 320;
 const MIN_HEIGHT = 460;
+const ICONFONT_RESULT_LIMIT = 4;
+const ICONFONT_POLL_MS = 400;
+const ICONFONT_TIMEOUT_MS = 12000;
+const OFFICIAL_SEARCH_LIMIT = 6;
+const ICONFONT_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const SNAP_DISTANCE = 14;
 const SNAP_RELEASE_DISTANCE = 26;
+const MOVE_SETTLE_MS = 180;
 let mainWindow;
 let snapEnabled = true;
 let isAdjustingPosition = false;
 let snappedX = null;
 let snappedY = null;
+let settleMoveTimer = null;
 
 function createWindow() {
   const display = screen.getPrimaryDisplay();
   const area = display.workArea;
-
-  const width = Math.min(DEFAULT_WIDTH, area.width);
-  const height = Math.min(DEFAULT_HEIGHT, area.height);
-  const x = area.x + Math.max(0, area.width - width - 16);
-  const y = area.y + 16;
+  const initialBounds = getDockedBounds(area);
 
   mainWindow = new BrowserWindow({
-    width,
-    height,
-    x,
-    y,
+    width: initialBounds.width,
+    height: initialBounds.height,
+    x: initialBounds.x,
+    y: initialBounds.y,
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
     resizable: false,
@@ -57,6 +62,11 @@ function createWindow() {
     }
   });
 
+  mainWindow.on("move", () => {
+    if (isAdjustingPosition) return;
+    scheduleSnapAfterMove();
+  });
+
   screen.on("display-metrics-changed", () => {
     clampWindowBounds(mainWindow);
   });
@@ -82,12 +92,24 @@ function clampBounds(bounds, area) {
   return { x, y, width, height };
 }
 
+function getDockedBounds(area, preferredX) {
+  const width = Math.min(Math.max(DEFAULT_WIDTH, MIN_WIDTH), area.width);
+  const y = area.y + Math.min(WINDOW_MARGIN_TOP, Math.max(0, area.height - MIN_HEIGHT));
+  const height = Math.min(Math.max(area.y + area.height - y, MIN_HEIGHT), area.height);
+  const fallbackX = area.x + Math.max(0, area.width - width - WINDOW_MARGIN_RIGHT);
+  const x = Number.isFinite(preferredX)
+    ? Math.min(Math.max(Number(preferredX), area.x), area.x + area.width - width)
+    : fallbackX;
+
+  return { x, y, width, height };
+}
+
 function clampWindowBounds(win) {
   if (!win) return;
   const bounds = win.getBounds();
   const display = screen.getDisplayMatching(bounds);
   const area = display.workArea;
-  const clamped = clampBounds(bounds, area);
+  const clamped = clampBounds(getDockedBounds(area, bounds.x), area);
 
   if (
     clamped.x !== bounds.x ||
@@ -134,6 +156,19 @@ function maybeAdjustPosition(win) {
     win.setPosition(targetX, targetY);
     isAdjustingPosition = false;
   }
+}
+
+function scheduleSnapAfterMove() {
+  if (!mainWindow) return;
+  clearTimeout(settleMoveTimer);
+  settleMoveTimer = setTimeout(() => {
+    settleMoveTimer = null;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    snappedX = null;
+    snappedY = null;
+    clampWindowBounds(mainWindow);
+    maybeAdjustPosition(mainWindow);
+  }, MOVE_SETTLE_MS);
 }
 
 function resolveAxisSnap(current, min, max, snappedState) {
@@ -200,7 +235,7 @@ if($workerW -ne [IntPtr]::Zero){ [Native]::SetParent($target, $workerW) | Out-Nu
 
 function queryWindowsShortcut(filePath) {
   return new Promise((resolve) => {
-    ws.query(filePath, (error, info) => {
+    ws.query(filePath, async (error, info) => {
       if (error || !info) return resolve(null);
 
       const target = String(info.target || "").trim();
@@ -208,13 +243,33 @@ function queryWindowsShortcut(filePath) {
 
       const args = String(info.args || "").trim();
       const url = /^https?:\/\//i.test(target) ? `${target}${args ? ` ${args}` : ""}` : target;
+      const iconPath = String(info.icon || "").trim();
 
       resolve({
         title: path.basename(filePath, path.extname(filePath)),
-        url
+        url,
+        shortcutIcon: await resolveShortcutIconDataUrl(iconPath, target, filePath)
       });
     });
   });
+}
+
+async function resolveShortcutIconDataUrl(iconPath, targetPath, shortcutPath) {
+  const normalizedIconPath = iconPath.includes(",") ? iconPath.split(",")[0].trim() : iconPath;
+  const candidates = [normalizedIconPath, targetPath, shortcutPath]
+    .filter((value) => typeof value === "string" && value.trim())
+    .map((value) => value.trim());
+
+  for (const candidate of candidates) {
+    try {
+      const icon = await app.getFileIcon(candidate, { size: "large" });
+      if (!icon.isEmpty()) return icon.toDataURL();
+    } catch {
+      // Try next candidate.
+    }
+  }
+
+  return "";
 }
 
 async function resolveLnkFiles(filePaths = []) {
@@ -231,6 +286,231 @@ async function resolveLnkFiles(filePaths = []) {
   }
 
   return output;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function svgToDataUrl(svgMarkup) {
+  const value = typeof svgMarkup === "string" ? svgMarkup.trim() : "";
+  if (!value) return "";
+  return `data:image/svg+xml;base64,${Buffer.from(value, "utf8").toString("base64")}`;
+}
+
+function decodeHtml(value) {
+  return String(value || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#x27;/g, "'");
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function buildOfficialSearchKeywords(query) {
+  const raw = String(query || "").trim();
+  if (!raw) return [];
+
+  const splitParts = raw
+    .split(/[\s,，、|/\\\-_:：;；()（）]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const keywords = new Set([raw, ...splitParts]);
+  splitParts.forEach((part) => {
+    if (part.length >= 2) keywords.add(part.slice(0, Math.min(part.length, 8)));
+  });
+
+  return Array.from(keywords).slice(0, 8);
+}
+
+function isBlockedOfficialHost(hostname, pathname) {
+  const host = String(hostname || "").toLowerCase();
+  const pathValue = String(pathname || "").toLowerCase();
+  if (!host) return true;
+
+  const blockedHosts = [
+    "hao123.com",
+    "www.hao123.com",
+    "tuijian.hao123.com",
+    "www.baidu.com",
+    "m.baidu.com",
+    "image.baidu.com",
+    "news.baidu.com",
+    "map.baidu.com",
+    "wenku.baidu.com",
+    "tieba.baidu.com",
+    "s.click.taobao.com",
+    "u.jd.com",
+    "p4psearch.1688.com",
+    "mos.m.taobao.com"
+  ];
+
+  if (blockedHosts.some((item) => host === item || host.endsWith(`.${item}`))) return true;
+  if (host.includes("baidu.com") && pathValue.startsWith("/s")) return true;
+  return false;
+}
+
+function scoreHao123Candidate(candidate, query) {
+  const text = normalizeSearchText(`${candidate.title} ${candidate.url}`);
+  const hostname = String(candidate.hostname || "").toLowerCase();
+  const normalizedHost = normalizeSearchText(hostname);
+  const keywords = buildOfficialSearchKeywords(query);
+  let score = 0;
+
+  if (candidate.title.includes("官网")) score += 36;
+  if (candidate.pathDepth === 0) score += 18;
+  if (candidate.pathDepth === 1) score += 10;
+  if (hostname.startsWith("www.")) score += 4;
+  if (candidate.protocol === "https:") score += 6;
+
+  keywords.forEach((keyword, index) => {
+    const normalizedKeyword = normalizeSearchText(keyword);
+    if (!normalizedKeyword || normalizedKeyword.length < 2) return;
+    if (text === normalizedKeyword) score += 120 - index * 8;
+    else if (text.includes(normalizedKeyword)) score += 70 - index * 5;
+    else if (normalizedKeyword.includes(text) && text.length >= 2) score += 55 - index * 4;
+    if (normalizedHost.includes(normalizedKeyword)) score += 42 - index * 3;
+  });
+
+  return score;
+}
+
+async function searchOfficialUrl(query) {
+  const keyword = typeof query === "string" ? query.trim() : "";
+  if (!keyword) return "";
+
+  try {
+    const response = await fetch("https://www.hao123.com/", {
+      headers: { "user-agent": ICONFONT_USER_AGENT }
+    });
+    const html = await response.text();
+
+    const results = [...html.matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)]
+      .map((match) => {
+        const url = decodeHtml(match[1]).trim();
+        const title = decodeHtml(match[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+        if (!url || !title || title.length > 24) return null;
+
+        try {
+          const parsed = new URL(url);
+          if (isBlockedOfficialHost(parsed.hostname, parsed.pathname)) return null;
+          return {
+            url: parsed.toString(),
+            title,
+            hostname: parsed.hostname,
+            protocol: parsed.protocol,
+            pathname: parsed.pathname,
+            pathDepth: parsed.pathname.split("/").filter(Boolean).length
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    if (!results.length) return "";
+
+    const uniqueResults = Array.from(
+      new Map(results.map((item) => [`${item.title}|${item.hostname}`, item])).values()
+    );
+
+    const ranked = uniqueResults
+      .map((candidate) => ({ ...candidate, score: scoreHao123Candidate(candidate, keyword) }))
+      .filter((candidate) => candidate.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, OFFICIAL_SEARCH_LIMIT);
+
+    return ranked[0]?.url || "";
+  } catch {
+    return "";
+  }
+}
+
+async function extractIconfontCandidates(win, limit = ICONFONT_RESULT_LIMIT) {
+  try {
+    return await win.webContents.executeJavaScript(
+      `(() => {
+        const normalizeSvg = (markup) => {
+          if (!markup) return "";
+          return markup.includes("xmlns=")
+            ? markup
+            : markup.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
+        };
+        return Array.from(document.querySelectorAll(".block-icon-list li"))
+          .map((item) => {
+            const name = (item.querySelector(".icon-name")?.textContent || "").trim();
+            const svg = item.querySelector(".icon-twrap svg");
+            if (!svg) return null;
+            return {
+              name,
+              svg: normalizeSvg(svg.outerHTML)
+            };
+          })
+          .filter(Boolean)
+          .slice(0, ${Number(limit) || ICONFONT_RESULT_LIMIT});
+      })();`,
+      true
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function fetchIconfontSuggestions(query, limit = ICONFONT_RESULT_LIMIT) {
+  const keyword = typeof query === "string" ? query.trim() : "";
+  if (!keyword) return [];
+  const win = new BrowserWindow({
+    show: false,
+    frame: false,
+    transparent: true,
+    webPreferences: {
+      sandbox: false,
+      contextIsolation: true,
+      backgroundThrottling: false
+    }
+  });
+
+  try {
+    const targetUrl = `https://www.iconfont.cn/search/index?searchType=icon&q=${encodeURIComponent(keyword)}`;
+    await win.loadURL(targetUrl, { userAgent: ICONFONT_USER_AGENT });
+
+    const deadline = Date.now() + ICONFONT_TIMEOUT_MS;
+    let suggestions = [];
+
+    while (Date.now() < deadline) {
+      suggestions = await extractIconfontCandidates(win, limit);
+      if (suggestions.length) break;
+
+      const hasNoResult = await win.webContents
+        .executeJavaScript(`Boolean(document.querySelector(".block-no-results"))`, true)
+        .catch(() => false);
+
+      if (hasNoResult) break;
+      await sleep(ICONFONT_POLL_MS);
+    }
+
+    return suggestions
+      .filter((item) => item?.svg)
+      .map((item, index) => ({
+        id: `${keyword}-${index}`,
+        name: item.name || keyword,
+        url: svgToDataUrl(item.svg)
+      }))
+      .filter((item) => item.url);
+  } catch {
+    return [];
+  } finally {
+    if (!win.isDestroyed()) win.destroy();
+  }
 }
 
 app.whenReady().then(() => {
@@ -276,16 +556,18 @@ ipcMain.handle("window:setSize", (_event, width, height) => {
   const bounds = mainWindow.getBounds();
   const display = screen.getDisplayMatching(bounds);
   const area = display.workArea;
-
   const next = clampBounds(
-    {
-      x: bounds.x,
-      y: bounds.y,
-      width: Number.isFinite(width) ? Number(width) : bounds.width,
-      height: Number.isFinite(height) ? Number(height) : bounds.height
-    },
+    getDockedBounds(
+      area,
+      bounds.x
+    ),
     area
   );
+
+  if (Number.isFinite(width)) {
+    next.width = Math.min(Math.max(Number(width), MIN_WIDTH), area.width);
+    next.x = Math.min(next.x, area.x + area.width - next.width);
+  }
 
   mainWindow.setBounds(next);
   clampWindowBounds(mainWindow);
@@ -307,6 +589,14 @@ ipcMain.handle("drop:setAccepting", (_event, accepting) => {
 ipcMain.handle("shortcuts:resolveLnkFiles", async (_event, filePaths) => {
   const paths = Array.isArray(filePaths) ? filePaths.filter((v) => typeof v === "string" && v) : [];
   return resolveLnkFiles(paths);
+});
+
+ipcMain.handle("icons:searchSuggestions", async (_event, query) => {
+  return fetchIconfontSuggestions(query);
+});
+
+ipcMain.handle("links:searchOfficialUrl", async (_event, query) => {
+  return searchOfficialUrl(query);
 });
 
 app.on("window-all-closed", () => {

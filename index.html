@@ -11,16 +11,7 @@
 </head>
 <body>
   <div class="app-shell" id="appShell">
-    <div class="window-top-sensor no-drag" id="windowTopSensor"></div>
-    <div class="window-drag-handle" id="windowDragHandle" title="按住可拖拽窗口">
-      <div class="drag-hint">
-        <span class="corner tl"></span>
-        <span class="corner tr"></span>
-        <span class="corner bl"></span>
-        <span class="corner br"></span>
-        <p>鼠标放置此区域，即可拖动窗口</p>
-      </div>
-    </div>
+    <div class="window-drag-band" id="windowDragBand" aria-hidden="true"></div>
 
     <main class="workspace" id="workspace">
       <section id="groups" class="groups"></section>
@@ -33,13 +24,27 @@
 
       <label>
         名称
-        <input name="title" type="text" maxlength="24" placeholder="例如：知乎" required />
+        <input id="addTitleInput" name="title" type="text" maxlength="24" placeholder="例如：知乎" required />
       </label>
 
       <label>
-        地址
-        <input name="url" type="url" placeholder="https://www.zhihu.com" required />
+        描述
+        <input id="addDescriptionInput" name="description" type="text" maxlength="48" placeholder="例如：知乎问答社区、B 站动画视频平台" />
       </label>
+
+      <label>
+        地址或路径
+        <input id="addUrlInput" name="url" type="text" placeholder="https://www.zhihu.com" required />
+      </label>
+      <p id="addLinkSearchStatus" class="field-hint">仅右键菜单创建图标时会根据描述自动填充官方链接</p>
+
+      <section class="icon-picker">
+        <div class="icon-picker-head">
+          <strong>图标候选</strong>
+          <span id="addIconSearchStatus" class="icon-picker-status">输入描述后自动搜索</span>
+        </div>
+        <div id="addIconSuggestions" class="icon-suggestion-grid"></div>
+      </section>
 
       <label>
         分组
@@ -68,9 +73,28 @@
       </label>
 
       <label class="checkbox">
+        <input id="showAddTileInput" name="showAddTile" type="checkbox" />
+        显示“添加图标”按钮
+      </label>
+
+      <label class="checkbox">
         <input id="showGroupTitleInput" name="showGroupTitle" type="checkbox" />
         显示组名
       </label>
+
+      <label>
+        图标排列方向
+        <select id="layoutDirectionInput" name="layoutDirection">
+          <option value="ltr">从左到右</option>
+          <option value="rtl">从右到左</option>
+        </select>
+      </label>
+
+      <label>
+        每排数量
+        <input id="trackCountInput" name="trackCount" type="range" min="2" max="6" step="1" />
+      </label>
+      <p id="trackCountHint" class="field-hint">当前每排显示 3 个图标</p>
 
       <label class="checkbox">
         <input id="snapEdgeInput" name="snapEdge" type="checkbox" />
@@ -89,20 +113,84 @@
     </form>
   </dialog>
 
+  <dialog id="editDialog" class="dialog">
+    <form method="dialog" id="editForm" class="dialog-form">
+      <h2>编辑图标</h2>
+
+      <label>
+        名称
+        <input id="editTitleInput" name="title" type="text" maxlength="24" required />
+      </label>
+
+      <label>
+        描述
+        <input id="editDescriptionInput" name="description" type="text" maxlength="48" />
+      </label>
+
+      <label>
+        地址或路径
+        <input id="editUrlInput" name="url" type="text" required />
+      </label>
+      <p id="editLinkSearchStatus" class="field-hint">编辑时不自动搜索官网，请按需手动修改地址</p>
+
+      <label>
+        分组
+        <select id="editGroupSelect" name="groupId"></select>
+      </label>
+
+      <label>
+        占位大小
+        <select id="editSizeSelect" name="size">
+          <option value="1x1">1x1</option>
+          <option value="1x2">1x2</option>
+          <option value="2x2">2x2</option>
+        </select>
+      </label>
+
+      <label>
+        图标来源
+        <select id="editIconModeSelect" name="iconMode">
+          <option value="default">默认图标</option>
+          <option value="custom">自定义图片</option>
+        </select>
+      </label>
+
+      <section class="icon-picker">
+        <div class="icon-picker-head">
+          <strong>图标候选</strong>
+          <span id="editIconSearchStatus" class="icon-picker-status">根据描述显示 4 个候选图标</span>
+        </div>
+        <div id="editIconSuggestions" class="icon-suggestion-grid"></div>
+      </section>
+
+      <p id="editIconModeHint" class="field-hint"></p>
+
+      <label id="editCustomIconField">
+        自定义图片地址
+        <input id="editCustomIconInput" name="customIcon" type="url" placeholder="https://example.com/icon.png" />
+      </label>
+
+      <menu>
+        <button value="cancel" type="button" id="cancelEditDialog">取消</button>
+        <button value="default" type="submit" class="primary">保存修改</button>
+      </menu>
+    </form>
+  </dialog>
+
   <div id="appContextMenu" class="context-menu" hidden>
-    <button type="button" data-action="open-settings">软件设置</button>
-    <button type="button" data-action="add-icon">添加图标</button>
-    <button type="button" data-action="toggle-snap">切换边缘吸附</button>
-    <button type="button" data-action="window-small">窗口小</button>
-    <button type="button" data-action="window-medium">窗口中</button>
-    <button type="button" data-action="window-large">窗口大</button>
+    <button type="button" data-action="add-icon" class="menu-accent"><span>添加图标</span></button>
+    <button type="button" data-action="open-settings"><span>软件设置</span></button>
+    <div class="menu-divider" role="separator"></div>
+    <button type="button" data-action="toggle-snap"><span>切换边缘吸附</span></button>
   </div>
 
+  <div id="dragToast" class="drag-toast" hidden></div>
+
   <div id="itemContextMenu" class="context-menu" hidden>
-    <button type="button" data-action="size-1x1">占位 1x1</button>
-    <button type="button" data-action="size-1x2">占位 1x2</button>
-    <button type="button" data-action="size-2x2">占位 2x2</button>
-    <button type="button" data-action="delete-item">删除</button>
+    <button type="button" data-action="edit-item"><span>编辑图标</span></button>
+    <button type="button" data-action="duplicate-item"><span>复制一个</span></button>
+    <div class="menu-divider" role="separator"></div>
+    <button type="button" data-action="delete-item" class="danger"><span>删除</span></button>
   </div>
 
   <template id="itemTemplate">
@@ -118,3 +206,4 @@
   <script src="./script.js"></script>
 </body>
 </html>
+

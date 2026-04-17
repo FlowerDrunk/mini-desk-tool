@@ -8,5 +8,7 @@ contextBridge.exposeInMainWorld("desktopPanel", {
   setWindowSize: (width, height) => ipcRenderer.invoke("window:setSize", width, height),
   setDropAccepting: (accepting) => ipcRenderer.invoke("drop:setAccepting", accepting),
   resolveLnkFiles: (filePaths) => ipcRenderer.invoke("shortcuts:resolveLnkFiles", filePaths),
+  searchIconSuggestions: (query) => ipcRenderer.invoke("icons:searchSuggestions", query),
+  searchOfficialUrl: (query) => ipcRenderer.invoke("links:searchOfficialUrl", query),
   snapAfterDrag: () => ipcRenderer.invoke("window:snapAfterDrag")
 });
