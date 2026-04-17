@@ -10,5 +10,7 @@ contextBridge.exposeInMainWorld("desktopPanel", {
   resolveLnkFiles: (filePaths) => ipcRenderer.invoke("shortcuts:resolveLnkFiles", filePaths),
   searchIconSuggestions: (query) => ipcRenderer.invoke("icons:searchSuggestions", query),
   searchOfficialUrl: (query) => ipcRenderer.invoke("links:searchOfficialUrl", query),
-  snapAfterDrag: () => ipcRenderer.invoke("window:snapAfterDrag")
+  snapAfterDrag: () => ipcRenderer.invoke("window:snapAfterDrag"),
+  getLaunchAtLogin: () => ipcRenderer.invoke("app:getLaunchAtLogin"),
+  setLaunchAtLogin: (enabled) => ipcRenderer.invoke("app:setLaunchAtLogin", enabled)
 });

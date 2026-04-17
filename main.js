@@ -177,6 +177,20 @@ function createTray() {
   return tray;
 }
 
+function getLaunchAtLoginState() {
+  const settings = app.getLoginItemSettings();
+  return Boolean(settings.openAtLogin);
+}
+
+function setLaunchAtLoginState(enabled) {
+  app.setLoginItemSettings({
+    openAtLogin: Boolean(enabled),
+    openAsHidden: false,
+    path: process.execPath
+  });
+  return getLaunchAtLoginState();
+}
+
 function clampBounds(bounds, area) {
   const width = Math.min(Math.max(bounds.width, MIN_WIDTH), area.width);
   const height = Math.min(Math.max(bounds.height, MIN_HEIGHT), area.height);
@@ -740,6 +754,14 @@ ipcMain.handle("url:open", (_event, url) => {
 
 ipcMain.handle("app:setSnapEnabled", (_event, enabled) => {
   snapEnabled = Boolean(enabled);
+});
+
+ipcMain.handle("app:getLaunchAtLogin", () => {
+  return getLaunchAtLoginState();
+});
+
+ipcMain.handle("app:setLaunchAtLogin", (_event, enabled) => {
+  return setLaunchAtLoginState(enabled);
 });
 
 ipcMain.handle("window:setSize", (_event, width, height) => {

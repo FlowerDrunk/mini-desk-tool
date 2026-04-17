@@ -67,6 +67,7 @@ const layoutDirectionInput = document.querySelector("#layoutDirectionInput");
 const trackCountInput = document.querySelector("#trackCountInput");
 const trackCountHint = document.querySelector("#trackCountHint");
 const snapEdgeInput = document.querySelector("#snapEdgeInput");
+const launchAtLoginInput = document.querySelector("#launchAtLoginInput");
 const dragToast = document.querySelector("#dragToast");
 const autoGroupButton = document.querySelector("#autoGroupButton");
 const closeWindowButton = document.querySelector("#closeWindow");
@@ -414,6 +415,16 @@ function bindEvents() {
     state.app.snapToEdge = snapEdgeInput.checked;
     window.desktopPanel?.setSnapEnabled?.(state.app.snapToEdge);
     saveState();
+  });
+
+  launchAtLoginInput?.addEventListener("change", async () => {
+    const nextValue = launchAtLoginInput.checked;
+    try {
+      const applied = await window.desktopPanel?.setLaunchAtLogin?.(nextValue);
+      launchAtLoginInput.checked = Boolean(applied);
+    } catch {
+      launchAtLoginInput.checked = !nextValue;
+    }
   });
 
   autoGroupButton.addEventListener("click", () => {
@@ -1334,7 +1345,7 @@ function syncEditDialogFields(shortcutIcon = "") {
   renderIconSuggestions("edit");
 }
 
-function openSettings() {
+async function openSettings() {
   hideMenus();
   iconSizeInput.value = String(state.layout.iconSize);
   gapInput.value = String(state.layout.gap);
@@ -1344,6 +1355,13 @@ function openSettings() {
   trackCountInput.value = String(state.layout.trackCount);
   updateTrackCountHint();
   snapEdgeInput.checked = !!state.app.snapToEdge;
+  if (launchAtLoginInput) {
+    try {
+      launchAtLoginInput.checked = Boolean(await window.desktopPanel?.getLaunchAtLogin?.());
+    } catch {
+      launchAtLoginInput.checked = false;
+    }
+  }
   settingsDialog.showModal();
 }
 

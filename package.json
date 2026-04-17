@@ -1,6 +1,6 @@
 {
   "name": "desktop-panel",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Desktop floating panel built with Electron",
   "main": "main.js",
   "scripts": {
