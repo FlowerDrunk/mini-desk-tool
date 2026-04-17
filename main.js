@@ -2,6 +2,7 @@
 const path = require("path");
 const { execFile } = require("child_process");
 const ws = require("windows-shortcuts");
+const { Menu, Tray } = require("electron");
 
 const DEFAULT_WIDTH = 360;
 const WINDOW_MARGIN_TOP = 0;
@@ -20,18 +21,29 @@ const SNAP_DISTANCE = 14;
 const SNAP_RELEASE_DISTANCE = 26;
 const MOVE_SETTLE_MS = 180;
 let mainWindow;
+let tray = null;
 let snapEnabled = true;
 let isAdjustingPosition = false;
 let snappedX = null;
 let snappedY = null;
 let settleMoveTimer = null;
+let isQuitting = false;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+
+app.setAppUserModelId("com.flowerdrunk.minidesktool");
 
 function createWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
   const display = screen.getPrimaryDisplay();
   const area = display.workArea;
   const initialBounds = getDockedBounds(area);
 
   mainWindow = new BrowserWindow({
+    show: true,
     width: initialBounds.width,
     height: initialBounds.height,
     x: initialBounds.x,
@@ -64,6 +76,16 @@ function createWindow() {
     }
   });
 
+  mainWindow.on("close", (event) => {
+    if (isQuitting) return;
+    event.preventDefault();
+    hideMainWindow();
+  });
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+
   mainWindow.on("move", () => {
     if (isAdjustingPosition) return;
     scheduleSnapAfterMove();
@@ -77,6 +99,75 @@ function createWindow() {
     shell.openExternal(url);
     return { action: "deny" };
   });
+
+  return mainWindow;
+}
+
+function getTrayIconPath() {
+  return path.join(__dirname, "build", "icon.ico");
+}
+
+function showMainWindow() {
+  const win = createWindow();
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+function hideMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.hide();
+}
+
+function toggleMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) {
+    showMainWindow();
+    return;
+  }
+  hideMainWindow();
+}
+
+function quitApplication() {
+  isQuitting = true;
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.destroy();
+  }
+  app.quit();
+}
+
+function createTray() {
+  if (tray) return tray;
+
+  tray = new Tray(getTrayIconPath());
+  tray.setToolTip("Mini Desk Tool");
+  tray.on("click", () => {
+    toggleMainWindow();
+  });
+  tray.on("double-click", () => {
+    showMainWindow();
+  });
+  tray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: "显示面板",
+      click: () => showMainWindow()
+    },
+    {
+      label: "隐藏面板",
+      click: () => hideMainWindow()
+    },
+    { type: "separator" },
+    {
+      label: "退出",
+      click: () => quitApplication()
+    }
+  ]));
+
+  return tray;
 }
 
 function clampBounds(bounds, area) {
@@ -603,11 +694,16 @@ async function fetchIconfontSuggestions(query, limit = ICONFONT_RESULT_LIMIT) {
 }
 
 app.whenReady().then(() => {
+  createTray();
   createWindow();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    showMainWindow();
   });
+});
+
+app.on("second-instance", () => {
+  showMainWindow();
 });
 
 ipcMain.handle("window:minimize", () => {
@@ -615,7 +711,7 @@ ipcMain.handle("window:minimize", () => {
 });
 
 ipcMain.handle("window:close", () => {
-  mainWindow?.close();
+  hideMainWindow();
 });
 
 ipcMain.handle("url:open", (_event, url) => {
@@ -689,5 +785,5 @@ ipcMain.handle("links:searchOfficialUrl", async (_event, query) => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  // Keep the app alive in the tray.
 });
