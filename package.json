@@ -1,6 +1,6 @@
 {
   "name": "desktop-panel",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Desktop floating panel built with Electron",
   "main": "main.js",
   "scripts": {
@@ -14,12 +14,19 @@
     "directories": {
       "output": "dist"
     },
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
     "files": [
       "index.html",
       "main.js",
       "preload.js",
       "script.js",
       "styles.css",
+      "build/icon.ico",
       "README.md",
       "README.zh-CN.md",
       "package.json"

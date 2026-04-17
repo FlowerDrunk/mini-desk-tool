@@ -109,7 +109,9 @@ function createWindow() {
 }
 
 function getTrayIconPath() {
-  return path.join(__dirname, "build", "icon.ico");
+  const packagedIconPath = path.join(process.resourcesPath, "icon.ico");
+  const devIconPath = path.join(__dirname, "build", "icon.ico");
+  return app.isPackaged ? packagedIconPath : devIconPath;
 }
 
 function showMainWindow() {
