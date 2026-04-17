@@ -1,4 +1,4 @@
-﻿const STORAGE_KEY = "desktop-panel-state-v7";
+const STORAGE_KEY = "desktop-panel-state-v7";
 const LEGACY_STORAGE_KEYS = ["desktop-panel-state-v6"];
 const DEFAULT_GROUP_ID = "group-default";
 const NEW_AUTO_GROUP = "__new_auto_group__";
