@@ -35,6 +35,11 @@ if (!hasSingleInstanceLock) {
 }
 
 app.setAppUserModelId("com.flowerdrunk.minidesktool");
+const appDataRoot = path.join(app.getPath("appData"), "MiniDeskTool");
+const sessionDataRoot = path.join(appDataRoot, "session");
+app.setPath("userData", appDataRoot);
+app.setPath("sessionData", sessionDataRoot);
+app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
 
 function createWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
