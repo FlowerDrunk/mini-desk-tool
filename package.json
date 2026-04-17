@@ -1,6 +1,6 @@
 {
   "name": "desktop-panel",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Desktop floating panel built with Electron",
   "main": "main.js",
   "scripts": {
@@ -10,6 +10,7 @@
   "build": {
     "appId": "com.flowerdrunk.minidesktool",
     "productName": "Mini Desk Tool",
+    "compression": "maximum",
     "directories": {
       "output": "dist"
     },
@@ -21,11 +22,16 @@
       "styles.css",
       "README.md",
       "README.zh-CN.md",
-      "package.json",
-      "node_modules/**/*"
+      "package.json"
     ],
     "asar": true,
     "win": {
+      "icon": "build/icon.ico",
+      "artifactName": "${productName} Setup ${version}.${ext}",
+      "electronLanguages": [
+        "zh-CN",
+        "en-US"
+      ],
       "signAndEditExecutable": false,
       "target": [
         {
