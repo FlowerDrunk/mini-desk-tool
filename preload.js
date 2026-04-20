@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld("desktopPanel", {
   setSnapEnabled: (enabled) => ipcRenderer.invoke("app:setSnapEnabled", enabled),
   setWindowSize: (width, height) => ipcRenderer.invoke("window:setSize", width, height),
   setDropAccepting: (accepting) => ipcRenderer.invoke("drop:setAccepting", accepting),
-  resolveLnkFiles: (filePaths) => ipcRenderer.invoke("shortcuts:resolveLnkFiles", filePaths),
+  resolveDroppedPaths: (filePaths) => ipcRenderer.invoke("shortcuts:resolveDroppedPaths", filePaths),
   searchIconSuggestions: (query) => ipcRenderer.invoke("icons:searchSuggestions", query),
   searchOfficialUrl: (query) => ipcRenderer.invoke("links:searchOfficialUrl", query),
   snapAfterDrag: () => ipcRenderer.invoke("window:snapAfterDrag"),

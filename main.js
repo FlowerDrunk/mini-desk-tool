@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, shell, screen } = require("electron");
+const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
 const ws = require("windows-shortcuts"); // 仅用这个库解析快捷方式
@@ -252,16 +253,87 @@ function resolveAxisSnap(current, min, max, snappedState) {
 // ==========================================================================
 // ✅ 这里是核心：完全使用 windows-shortcuts 解析 .lnk，无 PowerShell
 // ==========================================================================
-function queryWindowsShortcut(filePath) {
+function queryWindowsShortcutWithElectron(filePath) {
+  try {
+    const link = shell.readShortcutLink(filePath);
+    const target = String(link?.target || "").trim();
+    const args = String(link?.args || "").trim();
+    if (!target) return null;
+
+    let url = target;
+    if (args) url += ` ${args}`;
+
+    return {
+      title: path.basename(filePath, ".lnk"),
+      url: url.trim(),
+      shortcutIcon: ""
+    };
+  } catch {
+    return null;
+  }
+}
+
+function queryWindowsShortcutWithShell(filePath) {
+  return new Promise((resolve) => {
+    const powerShellPath = path.join(
+      process.env.SystemRoot || "C:\\Windows",
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe"
+    );
+    const script = [
+      "$ErrorActionPreference = 'Stop'",
+      "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+      "$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($args[0])",
+      "$result = [pscustomobject]@{",
+      "  targetPath = [string]$shortcut.TargetPath",
+      "  arguments = [string]$shortcut.Arguments",
+      "}",
+      "$result | ConvertTo-Json -Compress"
+    ].join("; ");
+
+    execFile(
+      powerShellPath,
+      ["-NoProfile", "-NonInteractive", "-Command", script, filePath],
+      { encoding: "utf8", windowsHide: true },
+      (error, stdout) => {
+        if (error || !stdout) return resolve(null);
+
+        try {
+          const parsed = JSON.parse(String(stdout).trim());
+          const target = String(parsed?.targetPath || "").trim();
+          const args = String(parsed?.arguments || "").trim();
+          if (!target) return resolve(null);
+
+          let url = target;
+          if (args) url += ` ${args}`;
+
+          resolve({
+            title: path.basename(filePath, ".lnk"),
+            url: url.trim(),
+            shortcutIcon: ""
+          });
+        } catch {
+          resolve(null);
+        }
+      }
+    );
+  });
+}
+
+function queryWindowsShortcutWithLibrary(filePath) {
   return new Promise((resolve) => {
     try {
       ws.query(filePath, (err, link) => {
         if (err || !link || !link.target) return resolve(null);
 
-        const target = link.target || "";
-        const args = link.args || "";
+        const target = String(link.target || "").trim();
+        const args = String(link.args || "").trim();
+        if (!target) return resolve(null);
+
         let url = target;
-        if (args) url += " " + args;
+        if (args) url += ` ${args}`;
 
         resolve({
           title: path.basename(filePath, ".lnk"),
@@ -275,16 +347,68 @@ function queryWindowsShortcut(filePath) {
   });
 }
 
+async function queryWindowsShortcut(filePath) {
+  const electronResult = queryWindowsShortcutWithElectron(filePath);
+  if (electronResult?.url) return electronResult;
+
+  const shellResult = await queryWindowsShortcutWithShell(filePath);
+  if (shellResult?.url) return shellResult;
+  return queryWindowsShortcutWithLibrary(filePath);
+}
+
+function getEntryTitle(filePath, isDirectory = false) {
+  const baseName = path.basename(filePath);
+  if (!baseName) return filePath;
+  if (isDirectory) return baseName;
+
+  const parsed = path.parse(baseName);
+  return parsed.name || parsed.base || filePath;
+}
+
+async function getFileIconDataUrl(filePath) {
+  try {
+    const icon = await app.getFileIcon(filePath, { size: "normal" });
+    if (!icon || icon.isEmpty()) return "";
+    return icon.toDataURL();
+  } catch {
+    return "";
+  }
+}
+
+async function resolveDroppedPath(filePath) {
+  const normalizedPath = String(filePath || "").trim();
+  if (!normalizedPath) return null;
+
+  try {
+    if (path.extname(normalizedPath).toLowerCase() === ".lnk") {
+      const shortcut = await queryWindowsShortcut(normalizedPath);
+      if (!shortcut?.url) return null;
+      return {
+        ...shortcut,
+        shortcutIcon: (await getFileIconDataUrl(normalizedPath)) || String(shortcut.shortcutIcon || "").trim()
+      };
+    }
+
+    const stats = await fs.promises.stat(normalizedPath);
+    return {
+      title: getEntryTitle(normalizedPath, stats.isDirectory()),
+      url: normalizedPath,
+      shortcutIcon: await getFileIconDataUrl(normalizedPath)
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function resolveShortcutIconDataUrl() {
   return ""; // 禁用图标避免报错
 }
 
-async function resolveLnkFiles(filePaths = []) {
+async function resolveDroppedPaths(filePaths = []) {
   const output = [];
   for (const fp of filePaths) {
     try {
-      if (path.extname(fp).toLowerCase() !== ".lnk") continue;
-      const res = await queryWindowsShortcut(fp);
+      const res = await resolveDroppedPath(fp);
       if (res?.url) output.push(res);
     } catch {}
   }
@@ -477,7 +601,7 @@ ipcMain.handle("drop:setAccepting", (_, acc) => {
   if (mainWindow) mainWindow.setIgnoreMouseEvents(!acc, { forward: true });
 });
 
-ipcMain.handle("shortcuts:resolveLnkFiles", async (_, paths) => resolveLnkFiles(paths || []));
+ipcMain.handle("shortcuts:resolveDroppedPaths", async (_, paths) => resolveDroppedPaths(paths || []));
 ipcMain.handle("icons:searchSuggestions", (_, q) => fetchIconfontSuggestions(q));
 ipcMain.handle("links:searchOfficialUrl", (_, q) => searchOfficialUrl(q));
 

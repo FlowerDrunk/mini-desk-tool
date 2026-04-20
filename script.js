@@ -987,9 +987,9 @@ function bindGridDropEvents(grid, groupSection, toGroupId) {
     groupSection.classList.remove("group-drop-target");
     clearDropIndicator();
 
-    if (hasDroppedShortcutFiles(event)) {
+    if (hasDroppedFilesystemEntries(event)) {
       event.stopPropagation();
-      await importDroppedShortcuts(event, toGroupId, getDropIndex(grid, event));
+      await importDroppedPaths(event, toGroupId, getDropIndex(grid, event));
       return;
     }
 
@@ -1049,13 +1049,13 @@ function getDropIndex(grid, event) {
 function extractDroppedFilePaths(event) {
   return Array.from(event.dataTransfer?.files || [])
     .map((file) => String(file?.path || "").trim())
-    .filter((filePath) => filePath && filePath.toLowerCase().endsWith(".lnk"));
+    .filter((filePath) => filePath);
 }
 
-async function importDroppedShortcuts(event, targetGroupId, dropIndex) {
+async function importDroppedPaths(event, targetGroupId, dropIndex) {
   const filePaths = extractDroppedFilePaths(event);
   if (!filePaths.length) return;
-  const shortcuts = await window.desktopPanel?.resolveLnkFiles?.(filePaths);
+  const shortcuts = await window.desktopPanel?.resolveDroppedPaths?.(filePaths);
   if (!Array.isArray(shortcuts) || !shortcuts.length) return;
   await addResolvedShortcutsToGroup(targetGroupId, shortcuts, dropIndex);
   externalDragDepth = 0;
@@ -1110,6 +1110,8 @@ async function enrichShortcutIconInBackground(itemId) {
   if (!located?.item) return;
 
   const item = located.item;
+  if (item.shortcutIcon || !safeHost(item.url)) return;
+
   const query = item.description || item.title;
   let suggestions = [];
   try {
@@ -1165,7 +1167,7 @@ function bindExternalShortcutDrop() {
     const targetGroupId = event.target.closest(".group-grid")?.dataset.groupId || DEFAULT_GROUP_ID;
     const dropGrid = event.target.closest(".group-grid");
     const dropIndex = dropGrid ? getDropIndex(dropGrid, event) : undefined;
-    await importDroppedShortcuts(event, targetGroupId, dropIndex);
+    await importDroppedPaths(event, targetGroupId, dropIndex);
   };
 
   window.addEventListener("dragenter", onDragEnter, true);
@@ -1178,8 +1180,8 @@ function isExternalFileDrag(event) {
   return Array.from(event.dataTransfer?.types || []).includes("Files");
 }
 
-function hasDroppedShortcutFiles(event) {
-  return Array.from(event.dataTransfer?.files || []).some((file) => String(file?.path || "").toLowerCase().endsWith(".lnk"));
+function hasDroppedFilesystemEntries(event) {
+  return Array.from(event.dataTransfer?.files || []).some((file) => String(file?.path || "").trim());
 }
 
 function moveItem(fromGroupId, toGroupId, itemId, dropIndex, shouldRender = true) {
