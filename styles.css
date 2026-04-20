@@ -154,6 +154,7 @@ dialog {
 
 .tile,
 .add-tile {
+  min-width: 0;
   min-height: var(--tile-base-size);
   border: 0;
   background: transparent;
@@ -161,23 +162,24 @@ dialog {
   padding: 0;
   margin: 0;
   cursor: pointer;
+  grid-column: span var(--item-col-span, 1);
+  grid-row: span var(--item-row-span, 1);
+  position: relative;
+}
+
+.tile {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  justify-items: center;
+  align-items: start;
+  gap: 6px;
+}
+
+.add-tile {
   display: grid;
   justify-items: center;
   align-content: start;
   gap: 6px;
-  grid-column: span 1;
-  grid-row: span 1;
-  position: relative;
-}
-
-.tile[data-size="1x2"] {
-  grid-column: span 1;
-  grid-row: span 2;
-}
-
-.tile[data-size="2x2"] {
-  grid-column: span 2;
-  grid-row: span 2;
 }
 
 .tile.dragging {
@@ -233,26 +235,46 @@ dialog {
 }
 
 .icon-wrap {
-  width: 100%;
-  display: grid;
-  place-items: center;
+  width: min(var(--item-frame-width, var(--item-icon-size, var(--icon-size))), 100%);
+  height: min(var(--item-frame-height, var(--item-icon-size, var(--icon-size))), 100%);
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  min-height: 0;
+  padding: var(--item-icon-pad-y, 0px) var(--item-icon-pad-x, 0px);
+  overflow: hidden;
+  border-radius: var(--item-wrap-radius, 18px);
+  justify-self: center;
+  align-self: start;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+  background-image:
+    var(--item-icon-image, none),
+    radial-gradient(circle at 28% 22%, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.06) 52%, rgba(170, 192, 216, 0.04) 100%),
+    linear-gradient(180deg, rgba(236, 242, 250, 0.22), rgba(205, 217, 232, 0.12));
+  background-repeat: no-repeat, no-repeat, no-repeat;
+  background-position: center, center, center;
+  background-size: contain, cover, cover;
+  background-origin: content-box, border-box, border-box;
+  background-clip: content-box, border-box, border-box;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.add-tile .icon-wrap {
+  width: var(--item-icon-size, var(--icon-size));
+  height: var(--item-icon-size, var(--icon-size));
 }
 
 .icon {
-  width: var(--item-icon-size, var(--icon-size));
-  height: var(--item-icon-size, var(--icon-size));
-  border-radius: 16px;
-  object-fit: contain;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
-  background:
-    radial-gradient(circle at 28% 22%, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.06) 52%, rgba(170, 192, 216, 0.04) 100%),
-    linear-gradient(180deg, rgba(236, 242, 250, 0.22), rgba(205, 217, 232, 0.12));
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  padding: 6px;
+  display: none;
 }
 
 .label {
   margin: 0;
+  width: 100%;
+  align-self: start;
   font-size: 12px;
   line-height: 1.25;
   max-width: 100%;

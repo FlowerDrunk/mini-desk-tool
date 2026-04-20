@@ -8,7 +8,7 @@ const { Menu, Tray } = require("electron");
 const DEFAULT_WIDTH = 360;
 const WINDOW_MARGIN_TOP = 0;
 const WINDOW_MARGIN_RIGHT = 16;
-const MIN_WIDTH = 320;
+const MIN_WIDTH = 200;
 const MIN_HEIGHT = 460;
 const ICONFONT_RESULT_LIMIT = 12;
 const ICONFONT_POLL_MS = 400;
@@ -214,8 +214,8 @@ function clampBounds(bounds, area) {
   return { x, y, width, height };
 }
 
-function getDockedBounds(area, preferredX) {
-  const width = Math.min(Math.max(DEFAULT_WIDTH, MIN_WIDTH), area.width);
+function getDockedBounds(area, preferredX, preferredWidth = DEFAULT_WIDTH) {
+  const width = Math.min(Math.max(preferredWidth, MIN_WIDTH), area.width);
   const y = area.y + Math.min(WINDOW_MARGIN_TOP, Math.max(0, area.height - MIN_HEIGHT));
   const height = Math.min(Math.max(area.y + area.height - y, MIN_HEIGHT), area.height);
   const fallbackX = area.x + Math.max(0, area.width - width - WINDOW_MARGIN_RIGHT);
@@ -228,7 +228,7 @@ function clampWindowBounds(win) {
   const bounds = win.getBounds();
   const display = screen.getDisplayMatching(bounds);
   const area = display.workArea;
-  const clamped = clampBounds(getDockedBounds(area, bounds.x), area);
+  const clamped = clampBounds(getDockedBounds(area, bounds.x, bounds.width), area);
   if (clamped.x !== bounds.x || clamped.y !== bounds.y || clamped.width !== bounds.width || clamped.height !== bounds.height) {
     win.setBounds(clamped);
   }
@@ -623,7 +623,7 @@ ipcMain.handle("window:setSize", (_, w, h) => {
   const b = mainWindow.getBounds();
   const d = screen.getDisplayMatching(b);
   const a = d.workArea;
-  const n = clampBounds(getDockedBounds(a, b.x), a);
+  const n = clampBounds(getDockedBounds(a, b.x, Number.isFinite(w) ? w : b.width), a);
   if (Number.isFinite(w)) n.width = Math.min(Math.max(w, MIN_WIDTH), a.width);
   mainWindow.setBounds(n);
   clampWindowBounds(mainWindow);

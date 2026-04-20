@@ -1,6 +1,8 @@
 # Mini Desk Tool
 
-[简体中文](./README.zh-CN.md)
+[简体中文（推荐）](./README.zh-CN.md) | [English](./README.md)
+
+Chinese documentation is the primary reference for this project. If you read Chinese, please use [`README.zh-CN.md`](./README.zh-CN.md) first.
 
 Mini Desk Tool is a lightweight Electron desktop panel for Windows. It stays attached to the desktop, keeps a compact floating footprint, and lets you organize website links and local shortcuts into tidy groups.
 

@@ -71,8 +71,8 @@
       </label>
 
       <label>
-        图标间距
-        <input id="gapInput" name="gap" type="range" min="8" max="24" step="1" />
+        窗口宽度
+        <input id="windowWidthInput" name="windowWidth" type="range" min="200" max="560" step="10" />
       </label>
 
       <label class="checkbox">
@@ -151,6 +151,7 @@
         占位大小
         <select id="editSizeSelect" name="size">
           <option value="1x1">1x1</option>
+          <option value="2x1">2x1</option>
           <option value="1x2">1x2</option>
           <option value="2x2">2x2</option>
         </select>
@@ -207,7 +208,7 @@
     <article class="tile no-drag" draggable="true" data-size="1x1">
       <button class="delete" type="button" title="删除">×</button>
       <div class="icon-wrap">
-        <img alt="" class="icon" loading="lazy" referrerpolicy="no-referrer" />
+        <div class="icon" aria-hidden="true"></div>
       </div>
       <p class="label"></p>
     </article>

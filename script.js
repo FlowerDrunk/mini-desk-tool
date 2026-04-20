@@ -1,12 +1,13 @@
-const STORAGE_KEY = "desktop-panel-state-v7";
+﻿const STORAGE_KEY = "desktop-panel-state-v7";
 const LEGACY_STORAGE_KEYS = ["desktop-panel-state-v6"];
 const DEFAULT_GROUP_ID = "group-default";
 const NEW_AUTO_GROUP = "__new_auto_group__";
 
 const SIZE_META = {
-  "1x1": { scale: 1 },
-  "1x2": { scale: 1.12 },
-  "2x2": { scale: 1.28 }
+  "1x1": { colSpan: 1, rowSpan: 1, widthScale: 1, heightScale: 1, frameInsetX: 0, frameInsetY: 0, iconPadX: 6, iconPadY: 6, wrapRadius: 18, iconRadius: 16 },
+  "2x1": { colSpan: 1, rowSpan: 2, widthScale: 1.18, heightScale: 2.18, frameInsetX: 2, frameInsetY: 28, iconPadX: 6, iconPadY: 6, wrapRadius: 18, iconRadius: 22 },
+  "1x2": { colSpan: 2, rowSpan: 1, widthScale: 2.18, heightScale: 1.18, frameInsetX: 4, frameInsetY: 10, iconPadX: 6, iconPadY: 6, wrapRadius: 18, iconRadius: 22 },
+  "2x2": { colSpan: 2, rowSpan: 2, widthScale: 2.22, heightScale: 2.22, frameInsetX: 0, frameInsetY: 10, iconPadX: 6, iconPadY: 6, wrapRadius: 24, iconRadius: 24 }
 };
 
 const DISPLAY_TEXT_REPAIRS = {
@@ -24,9 +25,12 @@ const DISPLAY_TEXT_REPAIRS = {
 };
 const TRACK_COUNT_MIN = 1;
 const TRACK_COUNT_MAX = 4;
+const DEFAULT_GAP = 14;
+const WINDOW_WIDTH_MIN = 200;
+const WINDOW_WIDTH_MAX = 560;
 
 const defaultState = {
-  layout: { iconSize: 58, gap: 14, showGroupTitle: true, showAddTile: false, flowDirection: "ltr", trackCount: 3 },
+  layout: { iconSize: 58, windowWidth: 360, showGroupTitle: true, showAddTile: false, flowDirection: "ltr", trackCount: 3 },
   app: { snapToEdge: true },
   groups: [
     {
@@ -60,7 +64,7 @@ const cancelAddDialog = document.querySelector("#cancelAddDialog");
 
 const settingsDialog = document.querySelector("#settingsDialog");
 const iconSizeInput = document.querySelector("#iconSizeInput");
-const gapInput = document.querySelector("#gapInput");
+const windowWidthInput = document.querySelector("#windowWidthInput");
 const showAddTileInput = document.querySelector("#showAddTileInput");
 const showGroupTitleInput = document.querySelector("#showGroupTitleInput");
 const layoutDirectionInput = document.querySelector("#layoutDirectionInput");
@@ -136,7 +140,7 @@ function hydrateState(parsed) {
 
   const layout = {
     iconSize: clampNumber(parsed?.layout?.iconSize, 42, 76, 58),
-    gap: clampNumber(parsed?.layout?.gap, 8, 24, 14),
+    windowWidth: clampNumber(parsed?.layout?.windowWidth, WINDOW_WIDTH_MIN, WINDOW_WIDTH_MAX, 360),
     showGroupTitle: parsed?.layout?.showGroupTitle !== false,
     showAddTile: parsed?.layout?.showAddTile === true,
     flowDirection: parsed?.layout?.flowDirection === "rtl" ? "rtl" : "ltr",
@@ -170,7 +174,7 @@ function loadState() {
 
     const layout = {
       iconSize: clampNumber(parsed.layout?.iconSize, 42, 76, 58),
-      gap: clampNumber(parsed.layout?.gap, 8, 24, 14),
+      windowWidth: clampNumber(parsed.layout?.windowWidth, WINDOW_WIDTH_MIN, WINDOW_WIDTH_MAX, 360),
       showGroupTitle: parsed.layout?.showGroupTitle !== false,
       showAddTile: parsed.layout?.showAddTile === true,
       flowDirection: parsed.layout?.flowDirection === "rtl" ? "rtl" : "ltr",
@@ -452,11 +456,10 @@ function bindEvents() {
     render();
   });
 
-  gapInput.addEventListener("input", () => {
-    state.layout.gap = clampNumber(Number(gapInput.value), 8, 24, 14);
-    applyLayout();
+  windowWidthInput.addEventListener("input", () => {
+    state.layout.windowWidth = clampNumber(Number(windowWidthInput.value), WINDOW_WIDTH_MIN, WINDOW_WIDTH_MAX, 360);
+    window.desktopPanel?.setWindowSize?.(state.layout.windowWidth);
     saveState();
-    render();
   });
 
   showAddTileInput.addEventListener("change", () => {
@@ -611,14 +614,33 @@ function createItemNode(item, groupId, index) {
   node.dataset.size = item.size;
 
   const icon = node.querySelector(".icon");
+  const iconWrap = node.querySelector(".icon-wrap");
   const label = node.querySelector(".label");
   const deleteButton = node.querySelector(".delete");
   const meta = SIZE_META[item.size] || SIZE_META["1x1"];
-  node.style.setProperty("--item-icon-size", `${Math.round(state.layout.iconSize * meta.scale)}px`);
+  const iconSize = Math.round(state.layout.iconSize);
+  const tileBase = Math.max(84, iconSize + 28);
+  const frameWidth = meta.colSpan === 1
+    ? Math.round(iconSize * meta.widthScale)
+    : tileBase * meta.colSpan + DEFAULT_GAP * (meta.colSpan - 1) - meta.frameInsetX;
+  const frameHeight = meta.rowSpan === 1
+    ? Math.round(iconSize * meta.heightScale)
+    : tileBase * meta.rowSpan + DEFAULT_GAP * (meta.rowSpan - 1) - meta.frameInsetY;
+
+  node.style.setProperty("--item-col-span", String(meta.colSpan));
+  node.style.setProperty("--item-row-span", String(meta.rowSpan));
+  node.style.setProperty("--item-icon-size", `${iconSize}px`);
+  node.style.setProperty("--item-frame-width", `${frameWidth}px`);
+  node.style.setProperty("--item-frame-height", `${frameHeight}px`);
+  node.style.setProperty("--item-icon-pad-x", `${meta.iconPadX}px`);
+  node.style.setProperty("--item-icon-pad-y", `${meta.iconPadY}px`);
+  node.style.setProperty("--item-wrap-radius", `${meta.wrapRadius}px`);
+  node.style.setProperty("--item-icon-radius", `${meta.iconRadius}px`);
 
   label.textContent = item.title;
-  icon.alt = `${item.title} 图标`;
-  setItemIcon(icon, item);
+  iconWrap?.setAttribute("role", "img");
+  iconWrap?.setAttribute("aria-label", `${item.title} 图标`);
+  setItemIcon(iconWrap, item);
 
   node.addEventListener("click", (event) => {
     if (event.target === deleteButton) return;
@@ -645,8 +667,6 @@ function createItemNode(item, groupId, index) {
   });
 
   // 为子元素添加样式，确保它们不会阻止拖拽事件
-  const iconWrap = node.querySelector(".icon-wrap");
-  
   if (iconWrap) {
     iconWrap.style.pointerEvents = "none";
   }
@@ -658,7 +678,7 @@ function createItemNode(item, groupId, index) {
   return node;
 }
 
-function setItemIcon(icon, item) {
+function setItemIcon(iconWrap, item) {
   const sources = [];
   if (item.iconMode === "custom" && item.customIcon) sources.push(item.customIcon);
   if (item.shortcutIcon) sources.push(item.shortcutIcon);
@@ -670,12 +690,24 @@ function setItemIcon(icon, item) {
   }
 
   sources.push(makeFallbackIcon(item.title));
-  let index = 0;
-  icon.src = sources[index];
-  icon.onerror = () => {
-    index += 1;
-    if (index < sources.length) icon.src = sources[index];
+  iconWrap?.style.setProperty("--item-icon-image", "none");
+
+  const applyBackground = (source) => {
+    iconWrap?.style.setProperty("--item-icon-image", `url(${JSON.stringify(source)})`);
   };
+
+  const trySource = (index) => {
+    if (index >= sources.length) return;
+
+    const source = sources[index];
+    const probe = new Image();
+    probe.referrerPolicy = "no-referrer";
+    probe.onload = () => applyBackground(source);
+    probe.onerror = () => trySource(index + 1);
+    probe.src = source;
+  };
+
+  trySource(0);
 }
 
 function getOriginalIconCandidate(type) {
@@ -1432,7 +1464,7 @@ function syncEditDialogFields(shortcutIcon = "") {
 
 async function syncSettingsDialogFields() {
   iconSizeInput.value = String(state.layout.iconSize);
-  gapInput.value = String(state.layout.gap);
+  windowWidthInput.value = String(clampNumber(state.layout.windowWidth, WINDOW_WIDTH_MIN, WINDOW_WIDTH_MAX, 360));
   showAddTileInput.checked = !!state.layout.showAddTile;
   showGroupTitleInput.checked = !!state.layout.showGroupTitle;
   layoutDirectionInput.value = state.layout.flowDirection === "rtl" ? "rtl" : "ltr";
@@ -1469,14 +1501,14 @@ function openMenu(menu, x, y) {
 
 function applyLayout() {
   const iconSize = clampNumber(state.layout.iconSize, 42, 76, 58);
-  const gap = clampNumber(state.layout.gap, 8, 24, 14);
   const trackCount = clampNumber(state.layout.trackCount, TRACK_COUNT_MIN, TRACK_COUNT_MAX, 3);
   const tileBase = Math.max(84, iconSize + 28);
   document.documentElement.style.setProperty("--icon-size", `${iconSize}px`);
-  document.documentElement.style.setProperty("--gap", `${gap}px`);
+  document.documentElement.style.setProperty("--gap", `${DEFAULT_GAP}px`);
   document.documentElement.style.setProperty("--tile-base-size", `${tileBase}px`);
   document.documentElement.style.setProperty("--track-count", String(trackCount));
   appShell.dataset.flow = state.layout.flowDirection === "rtl" ? "rtl" : "ltr";
+  window.desktopPanel?.setWindowSize?.(clampNumber(state.layout.windowWidth, WINDOW_WIDTH_MIN, WINDOW_WIDTH_MAX, 360));
   updateTrackCountHint();
 }
 
