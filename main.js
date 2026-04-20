@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, screen } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell, screen } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
@@ -31,11 +31,50 @@ let snappedY = null;
 let settleMoveTimer = null;
 let isQuitting = false;
 
+function copyDirectoryIfMissing(sourceDir, targetDir) {
+  try {
+    if (!fs.existsSync(sourceDir) || fs.existsSync(targetDir)) return;
+    fs.mkdirSync(path.dirname(targetDir), { recursive: true });
+    fs.cpSync(sourceDir, targetDir, { recursive: true });
+  } catch {}
+}
+
+function ensureWritableDirectory(dirPath) {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+    fs.accessSync(dirPath, fs.constants.R_OK | fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveUserDataRoot() {
+  const legacyRoot = path.join(app.getPath("appData"), "MiniDeskTool");
+  if (!app.isPackaged) return legacyRoot;
+
+  const installRoot = path.dirname(process.execPath);
+  const preferredRoot = path.join(installRoot, "data");
+
+  if (ensureWritableDirectory(preferredRoot)) {
+    copyDirectoryIfMissing(legacyRoot, preferredRoot);
+    return preferredRoot;
+  }
+
+  return legacyRoot;
+}
+
+function buildBackupFileName() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return `mini-desk-tool-backup-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.json`;
+}
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
 
 app.setAppUserModelId("com.flowerdrunk.minidesktool");
-const appDataRoot = path.join(app.getPath("appData"), "MiniDeskTool");
+const appDataRoot = resolveUserDataRoot();
 const sessionDataRoot = path.join(appDataRoot, "session");
 app.setPath("userData", appDataRoot);
 app.setPath("sessionData", sessionDataRoot);
@@ -599,6 +638,36 @@ ipcMain.handle("window:snapAfterDrag", () => {
 
 ipcMain.handle("drop:setAccepting", (_, acc) => {
   if (mainWindow) mainWindow.setIgnoreMouseEvents(!acc, { forward: true });
+});
+
+ipcMain.handle("state:export", async (event, content) => {
+  const ownerWindow = BrowserWindow.fromWebContents(event.sender) || mainWindow || undefined;
+  const defaultDir = app.isPackaged ? appDataRoot : app.getPath("documents");
+  const result = await dialog.showSaveDialog(ownerWindow, {
+    title: "导出数据",
+    defaultPath: path.join(defaultDir, buildBackupFileName()),
+    filters: [{ name: "JSON Files", extensions: ["json"] }]
+  });
+
+  if (result.canceled || !result.filePath) return { canceled: true };
+
+  await fs.promises.writeFile(result.filePath, String(content || ""), "utf8");
+  return { canceled: false, filePath: result.filePath };
+});
+
+ipcMain.handle("state:import", async (event) => {
+  const ownerWindow = BrowserWindow.fromWebContents(event.sender) || mainWindow || undefined;
+  const result = await dialog.showOpenDialog(ownerWindow, {
+    title: "导入数据",
+    filters: [{ name: "JSON Files", extensions: ["json"] }],
+    properties: ["openFile"]
+  });
+
+  if (result.canceled || !result.filePaths?.[0]) return { canceled: true };
+
+  const filePath = result.filePaths[0];
+  const content = await fs.promises.readFile(filePath, "utf8");
+  return { canceled: false, filePath, content };
 });
 
 ipcMain.handle("shortcuts:resolveDroppedPaths", async (_, paths) => resolveDroppedPaths(paths || []));

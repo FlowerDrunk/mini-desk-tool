@@ -69,6 +69,8 @@ const trackCountHint = document.querySelector("#trackCountHint");
 const snapEdgeInput = document.querySelector("#snapEdgeInput");
 const launchAtLoginInput = document.querySelector("#launchAtLoginInput");
 const dragToast = document.querySelector("#dragToast");
+const exportDataButton = document.querySelector("#exportDataButton");
+const importDataButton = document.querySelector("#importDataButton");
 const autoGroupButton = document.querySelector("#autoGroupButton");
 const closeWindowButton = document.querySelector("#closeWindow");
 const cancelSettingsDialog = document.querySelector("#cancelSettingsDialog");
@@ -128,6 +130,36 @@ bindEvents();
 bindDragBand();
 renderIconSuggestions("add");
 renderIconSuggestions("edit");
+
+function hydrateState(parsed) {
+  if (Array.isArray(parsed)) return migrateFromLegacyArray(parsed);
+
+  const layout = {
+    iconSize: clampNumber(parsed?.layout?.iconSize, 42, 76, 58),
+    gap: clampNumber(parsed?.layout?.gap, 8, 24, 14),
+    showGroupTitle: parsed?.layout?.showGroupTitle !== false,
+    showAddTile: parsed?.layout?.showAddTile === true,
+    flowDirection: parsed?.layout?.flowDirection === "rtl" ? "rtl" : "ltr",
+    trackCount: clampNumber(parsed?.layout?.trackCount, TRACK_COUNT_MIN, TRACK_COUNT_MAX, 3)
+  };
+  const appConfig = { snapToEdge: parsed?.app?.snapToEdge !== false };
+  const groups = Array.isArray(parsed?.groups)
+    ? parsed.groups
+        .map((group) => ({
+          id: group.id || crypto.randomUUID(),
+          name: repairDisplayText(String(group.name || "鏈懡鍚嶇粍").trim() || "鏈懡鍚嶇粍"),
+          items: Array.isArray(group.items)
+            ? group.items
+                .filter((item) => item && typeof item.title === "string" && typeof item.url === "string")
+                .map((item) => normalizeItem(item))
+            : []
+        }))
+        .filter((group) => group.items.length || group.id === DEFAULT_GROUP_ID)
+    : [];
+
+  if (!groups.length) groups.push(structuredClone(defaultState.groups[0]));
+  return { layout, app: appConfig, groups };
+}
 
 function loadState() {
   try {
@@ -197,6 +229,49 @@ function normalizeItem(item) {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function buildExportPayload() {
+  return JSON.stringify({
+    app: "Mini Desk Tool",
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    state
+  }, null, 2);
+}
+
+function extractImportedState(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === "object" && payload.state) return payload.state;
+  return payload;
+}
+
+async function exportDataToFile() {
+  try {
+    const result = await window.desktopPanel?.exportStateFile?.(buildExportPayload());
+    if (result?.canceled) return;
+    if (result?.filePath) showDragToast(`数据已导出到 ${result.filePath}`);
+  } catch {
+    showDragToast("导出失败，请稍后重试");
+  }
+}
+
+async function importDataFromFile() {
+  try {
+    const result = await window.desktopPanel?.importStateFile?.();
+    if (result?.canceled || !result?.content) return;
+
+    const nextState = hydrateState(extractImportedState(JSON.parse(result.content)));
+    state = nextState;
+    saveState();
+    applyLayout();
+    window.desktopPanel?.setSnapEnabled?.(state.app.snapToEdge);
+    render();
+    if (settingsDialog.open) await syncSettingsDialogFields();
+    showDragToast(`数据已从 ${result.filePath} 导入`);
+  } catch {
+    showDragToast("导入失败，请确认选择的是有效备份文件");
+  }
 }
 
 function bindEvents() {
@@ -425,6 +500,14 @@ function bindEvents() {
     } catch {
       launchAtLoginInput.checked = !nextValue;
     }
+  });
+
+  exportDataButton?.addEventListener("click", () => {
+    void exportDataToFile();
+  });
+
+  importDataButton?.addEventListener("click", () => {
+    void importDataFromFile();
   });
 
   autoGroupButton.addEventListener("click", () => {
@@ -1347,8 +1430,7 @@ function syncEditDialogFields(shortcutIcon = "") {
   renderIconSuggestions("edit");
 }
 
-async function openSettings() {
-  hideMenus();
+async function syncSettingsDialogFields() {
   iconSizeInput.value = String(state.layout.iconSize);
   gapInput.value = String(state.layout.gap);
   showAddTileInput.checked = !!state.layout.showAddTile;
@@ -1364,6 +1446,11 @@ async function openSettings() {
       launchAtLoginInput.checked = false;
     }
   }
+}
+
+async function openSettings() {
+  hideMenus();
+  await syncSettingsDialogFields();
   settingsDialog.showModal();
 }
 

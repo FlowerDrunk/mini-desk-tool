@@ -12,6 +12,7 @@ Mini Desk Tool is a lightweight Electron desktop panel for Windows. It stays att
 - Edit title, description, link or path, size, group, and icon source
 - Drag files, folders, apps, and `.lnk` shortcuts directly into the panel
 - Open local files, folders, apps, and web links from the same launcher surface
+- Export and import panel data from the settings dialog
 - Prefer Windows-native icons for imported local entries
 - Icon suggestions from Iconfont with batch refresh
 - Original icon fallback for website links and imported Windows shortcuts
@@ -88,4 +89,5 @@ Priority order:
 ## Notes
 
 - This project is currently optimized for Windows desktop usage.
+- Packaged builds prefer storing app data in a writable `data/` folder next to the installed executable.
 - Some legacy UI strings in the repository still need a broader encoding cleanup pass.
