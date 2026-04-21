@@ -75,18 +75,24 @@ Priority order:
 
 ```text
 .
-|-- index.html
-|-- styles.css
-|-- script.js
-|-- main.js
-|-- preload.js
+|-- electron/
+|   |-- main.js
+|   `-- preload.js
+|-- src/
+|   |-- index.html
+|   |-- main.js
+|   `-- styles.css
+|-- build/
+|-- renderer-dist/
+|-- vite.config.js
 `-- package.json
 ```
 
 ## Scripts
 
-- `npm start` - start the Electron app
-- `npm run build` - build the Windows installer
+- `npm start` / `npm run dev` - start Vite and Electron in development mode
+- `npm run build:renderer` - build the Vite renderer into `renderer-dist/`
+- `npm run build` - build the renderer and package the Windows installer
 
 ## Notes
 

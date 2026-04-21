@@ -73,11 +73,16 @@ Windows 安装包会输出到 `dist/` 目录。
 
 ```text
 .
-|-- index.html
-|-- styles.css
-|-- script.js
-|-- main.js
-|-- preload.js
+|-- electron/
+|   |-- main.js
+|   `-- preload.js
+|-- src/
+|   |-- index.html
+|   |-- main.js
+|   `-- styles.css
+|-- build/
+|-- renderer-dist/
+|-- vite.config.js
 `-- package.json
 ```
 

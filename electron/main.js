@@ -21,6 +21,8 @@ const ICONFONT_USER_AGENT =
 const SNAP_DISTANCE = 14;
 const SNAP_RELEASE_DISTANCE = 26;
 const MOVE_SETTLE_MS = 180;
+const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
+const ROOT_DIR = path.resolve(__dirname, "..");
 
 let mainWindow;
 let tray = null;
@@ -110,7 +112,11 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadFile(path.join(__dirname, "index.html"));
+  if (VITE_DEV_SERVER_URL) {
+    mainWindow.loadURL(VITE_DEV_SERVER_URL);
+  } else {
+    mainWindow.loadFile(path.join(ROOT_DIR, "renderer-dist", "index.html"));
+  }
   mainWindow.setAlwaysOnTop(false);
 
   mainWindow.once("ready-to-show", () => {
@@ -146,7 +152,7 @@ function createWindow() {
 
 function getTrayIconPath() {
   const packagedIconPath = path.join(process.resourcesPath, "icon.ico");
-  const devIconPath = path.join(__dirname, "build", "icon.ico");
+  const devIconPath = path.join(ROOT_DIR, "build", "icon.ico");
   return app.isPackaged ? packagedIconPath : devIconPath;
 }
 
@@ -305,6 +311,7 @@ function queryWindowsShortcutWithElectron(filePath) {
     return {
       title: path.basename(filePath, ".lnk"),
       url: url.trim(),
+      iconPath: String(link?.icon || "").trim(),
       shortcutIcon: ""
     };
   } catch {
@@ -328,6 +335,7 @@ function queryWindowsShortcutWithShell(filePath) {
       "$result = [pscustomobject]@{",
       "  targetPath = [string]$shortcut.TargetPath",
       "  arguments = [string]$shortcut.Arguments",
+      "  iconLocation = [string]$shortcut.IconLocation",
       "}",
       "$result | ConvertTo-Json -Compress"
     ].join("; ");
@@ -343,6 +351,7 @@ function queryWindowsShortcutWithShell(filePath) {
           const parsed = JSON.parse(String(stdout).trim());
           const target = String(parsed?.targetPath || "").trim();
           const args = String(parsed?.arguments || "").trim();
+          const iconPath = String(parsed?.iconLocation || "").trim();
           if (!target) return resolve(null);
 
           let url = target;
@@ -351,6 +360,7 @@ function queryWindowsShortcutWithShell(filePath) {
           resolve({
             title: path.basename(filePath, ".lnk"),
             url: url.trim(),
+            iconPath,
             shortcutIcon: ""
           });
         } catch {
@@ -369,6 +379,7 @@ function queryWindowsShortcutWithLibrary(filePath) {
 
         const target = String(link.target || "").trim();
         const args = String(link.args || "").trim();
+        const iconPath = String(link.icon || "").trim();
         if (!target) return resolve(null);
 
         let url = target;
@@ -377,6 +388,7 @@ function queryWindowsShortcutWithLibrary(filePath) {
         resolve({
           title: path.basename(filePath, ".lnk"),
           url: url.trim(),
+          iconPath,
           shortcutIcon: ""
         });
       });
@@ -414,17 +426,72 @@ async function getFileIconDataUrl(filePath) {
   }
 }
 
+function stripShortcutIconLocation(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/^(.*?)(?:,\s*-?\d+)?$/);
+  return String(match?.[1] || raw).trim().replace(/^"(.*)"$/, "$1");
+}
+
+function expandWindowsEnvVars(value) {
+  return String(value || "").replace(/%([^%]+)%/g, (_, name) => process.env[name] || `%${name}%`);
+}
+
+async function resolveShortcutDisplayIcon(filePath, shortcut = null) {
+  const candidates = [
+    stripShortcutIconLocation(shortcut?.iconPath),
+    String(shortcut?.url || "").trim().split(/\s+/)[0],
+    filePath
+  ]
+    .map((entry) => expandWindowsEnvVars(entry))
+    .filter(Boolean);
+
+  for (const candidate of candidates) {
+    const icon = await getFileIconDataUrl(candidate);
+    if (icon) return icon;
+  }
+
+  return "";
+}
+
+async function queryInternetShortcut(filePath) {
+  try {
+    const content = await fs.promises.readFile(filePath, "utf8");
+    const url = String(content.match(/^\s*URL=(.+)$/im)?.[1] || "").trim();
+    if (!url) return null;
+
+    return {
+      title: path.basename(filePath, ".url"),
+      url,
+      iconPath: String(content.match(/^\s*IconFile=(.+)$/im)?.[1] || "").trim(),
+      shortcutIcon: ""
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function resolveDroppedPath(filePath) {
   const normalizedPath = String(filePath || "").trim();
   if (!normalizedPath) return null;
 
   try {
-    if (path.extname(normalizedPath).toLowerCase() === ".lnk") {
+    const ext = path.extname(normalizedPath).toLowerCase();
+    if (ext === ".lnk") {
       const shortcut = await queryWindowsShortcut(normalizedPath);
       if (!shortcut?.url) return null;
       return {
         ...shortcut,
-        shortcutIcon: (await getFileIconDataUrl(normalizedPath)) || String(shortcut.shortcutIcon || "").trim()
+        shortcutIcon: (await resolveShortcutDisplayIcon(normalizedPath, shortcut)) || String(shortcut.shortcutIcon || "").trim()
+      };
+    }
+
+    if (ext === ".url") {
+      const shortcut = await queryInternetShortcut(normalizedPath);
+      if (!shortcut?.url) return null;
+      return {
+        ...shortcut,
+        shortcutIcon: (await resolveShortcutDisplayIcon(normalizedPath, shortcut)) || String(shortcut.shortcutIcon || "").trim()
       };
     }
 

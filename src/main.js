@@ -1,4 +1,6 @@
-﻿const STORAGE_KEY = "desktop-panel-state-v7";
+import "./styles.css";
+
+const STORAGE_KEY = "desktop-panel-state-v7";
 const LEGACY_STORAGE_KEYS = ["desktop-panel-state-v6"];
 const DEFAULT_GROUP_ID = "group-default";
 const NEW_AUTO_GROUP = "__new_auto_group__";
@@ -10,19 +12,6 @@ const SIZE_META = {
   "2x2": { colSpan: 2, rowSpan: 2, widthScale: 2.22, heightScale: 2.22, frameInsetX: 0, frameInsetY: 10, iconPadX: 6, iconPadY: 6, wrapRadius: 24, iconRadius: 24 }
 };
 
-const DISPLAY_TEXT_REPAIRS = {
-  "甯哥敤": "常用",
-  "鐭ヤ箮": "知乎",
-  "鑵捐瑙嗛": "腾讯视频",
-  "鏈懡鍚嶇粍": "未命名组",
-  "蹇嵎鏂瑰紡": "快捷方式",
-  "鐭ヨ瘑": "知识",
-  "褰遍煶": "影音",
-  "寮€鍙?": "开发",
-  "璧勮": "资讯",
-  "璐墿": "购物",
-  "閭": "邮箱"
-};
 const TRACK_COUNT_MIN = 1;
 const TRACK_COUNT_MAX = 4;
 const DEFAULT_GAP = 14;
@@ -1225,9 +1214,10 @@ async function enrichShortcutIconInBackground(itemId) {
   if (!located?.item) return;
 
   const item = located.item;
-  if (item.shortcutIcon || !safeHost(item.url)) return;
+  if (item.iconMode === "custom" && item.customIcon) return;
 
   const query = item.description || item.title;
+  if (!String(query || "").trim()) return;
   let suggestions = [];
   try {
     suggestions = (await window.desktopPanel?.searchIconSuggestions?.(query)) || [];
@@ -1239,6 +1229,7 @@ async function enrichShortcutIconInBackground(itemId) {
 
   const latest = findItemById(itemId);
   if (!latest?.item) return;
+  if (latest.item.iconMode === "custom" && latest.item.customIcon) return;
   latest.item.iconMode = "custom";
   latest.item.customIcon = suggestions[0].url;
   saveState();
@@ -1598,8 +1589,7 @@ function inferGroupName(title, url, description = "") {
 
 // 修复显示文本 - (已弃用)
 function repairDisplayText(value) {
-  const normalized = String(value || "").trim();
-  return DISPLAY_TEXT_REPAIRS[normalized] || normalized;
+  return value;
 }
 
 function uniqueGroupName(baseName) {
