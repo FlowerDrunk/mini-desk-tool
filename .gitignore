@@ -4,3 +4,5 @@ Thumbs.db
 .codex/
 dist/
 renderer-dist/
+playwright-report/
+test-results/

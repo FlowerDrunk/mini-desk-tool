@@ -2,40 +2,49 @@
 
 [English](./README.md)
 
-Mini Desk Tool 是一个基于 Electron 的 Windows 桌面悬浮面板工具。它贴附在桌面层上，以较小的占用提供统一的启动入口，方便你按分组管理网站、本地文件、文件夹、应用程序和快捷方式。
+Mini Desk Tool 是一个基于 Tauri 的 Windows 桌面悬浮面板工具。它可以贴在桌面边缘，以较小的占用提供统一的启动入口，方便管理网站、本地文件、文件夹、应用程序和快捷方式。
 
 ## 功能特性
 
-- 桌面悬浮面板，支持贴边吸附
-- 图标分组布局，支持设置流向和列数
-- 支持从面板 UI 或右键菜单添加网站链接
-- 可编辑名称、描述、地址或路径、尺寸、分组和图标来源
-- 支持直接拖拽文件、文件夹、应用程序和 `.lnk` 快捷方式到主面板
-- 可在同一入口中打开本地文件、本地文件夹、应用程序和网页链接
-- 可在设置面板中导出和导入面板数据
-- 导入本地项目时优先使用 Windows 原生系统图标
-- 集成 Iconfont 图标推荐，并支持批量刷新
-- 网站链接和 Windows 快捷方式支持原始图标兜底
-- 可根据名称、描述和域名自动分组
-- 面板宽度会根据当前最宽分组自适应调整
+- 桌面悬浮面板，支持原生窗口贴边吸附。
+- 图标分组布局，支持设置排列方向和每排数量。
+- 支持调整面板宽度，窗口最小宽度为 300 px。
+- 支持从面板 UI 或右键菜单添加网站链接。
+- 可编辑名称、描述、地址或路径、占位大小、分组和图标来源。
+- 支持直接拖拽文件、文件夹、应用程序和 `.lnk` 快捷方式到主面板。
+- 可在同一个入口打开本地文件、本地文件夹、应用程序和网页链接。
+- 可在设置面板中导出和导入面板数据。
+- 导入本地项目时优先使用 Windows 原生系统图标。
+- 集成 Iconfont 图标推荐，并支持批量刷新。
+- 网站链接和 Windows 快捷方式支持原始图标兜底。
+- 可根据名称、描述和域名自动分组。
+- 设置面板支持开机启动。
+
+## v1.1.0
+
+- 修复原生窗口拖拽后的左右边缘吸附，窗口停止移动后会自动吸附。
+- 修复 Windows 显示缩放下窗口坐标和尺寸计算不一致的问题。
+- 修复贴左或贴右时调整窗口宽度导致位置异常、界面像消失的问题。
+- 将窗口最小宽度统一提升到 300 px，覆盖 UI、Tauri 配置和运行时边界。
 
 ## 技术栈
 
-- Electron
+- Tauri 2
+- Vite
 - 原生 HTML / CSS / JavaScript
-- Electron 原生 shell API
-- `windows-shortcuts`，作为 `.lnk` 解析的兜底方案
+- Rust 后端命令，用于原生 shell、窗口、托盘和快捷方式处理
 
 ## 运行要求
 
 - Windows
-- Node.js 18 及以上
+- Node.js 18+
+- Rust 工具链
 
 ## 本地启动
 
 ```bash
 npm install
-npm start
+npm run dev
 ```
 
 ## 构建
@@ -44,22 +53,11 @@ npm start
 npm run build
 ```
 
-Windows 安装包会输出到 `dist/` 目录。
+Windows 安装包会输出到：
 
-## 可选搜索 API
-
-为了提升“根据描述自动搜索官网”的准确率，应用支持接入搜索 API。
-
-可选环境变量：
-
-- `TAVILY_API_KEY`
-- `BRAVE_SEARCH_API_KEY`
-
-调用优先级：
-
-1. Tavily Search API
-2. Brave Search API
-3. Hao123 兜底匹配
+```text
+src-tauri/target/release/bundle/nsis/
+```
 
 ## 当前行为说明
 
@@ -73,14 +71,17 @@ Windows 安装包会输出到 `dist/` 目录。
 
 ```text
 .
-|-- electron/
-|   |-- main.js
-|   `-- preload.js
 |-- src/
 |   |-- index.html
 |   |-- main.js
-|   `-- styles.css
-|-- build/
+|   |-- desktop-panel.js
+|   `-- features/
+|-- src-tauri/
+|   |-- src/
+|   |-- icons/
+|   `-- tauri.conf.json
+|-- tests/
+|-- scripts/
 |-- renderer-dist/
 |-- vite.config.js
 `-- package.json
@@ -88,11 +89,14 @@ Windows 安装包会输出到 `dist/` 目录。
 
 ## 脚本
 
-- `npm start`：启动 Electron 应用
-- `npm run build`：构建 Windows 安装包
+- `npm run dev`：启动 Tauri 开发应用。
+- `npm run dev:web`：只启动 Vite renderer。
+- `npm run build:renderer`：构建 Vite renderer 到 `renderer-dist/`。
+- `npm run build`：构建 renderer 并打包 Windows 安装包。
+- `npm run test:e2e`：运行 Playwright 测试。
 
 ## 备注
 
 - 当前项目主要面向 Windows 桌面场景。
-- 打包后的安装版会优先把应用数据存放到程序旁边可写的 `data/` 目录。
+- 打包产物为 NSIS 安装包。
 - 仓库里仍有部分历史 UI 文案需要后续统一做一次编码清理。
