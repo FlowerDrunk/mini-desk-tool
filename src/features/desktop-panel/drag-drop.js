@@ -230,7 +230,7 @@ export function registerDragDropFeature(app) {
   }
 
   function clearAllDropTargets() {
-    document.querySelectorAll(".group-grid").forEach((grid) => grid.classList.remove("drop-target", "drop-full"));
+    document.querySelectorAll(".group-grid").forEach((grid) => grid.classList.remove("drop-target", "drop-full", "drop-empty"));
     document.querySelectorAll(".group").forEach((group) => group.classList.remove("group-drop-target"));
     clearDropIndicator();
   }
@@ -474,6 +474,7 @@ export function registerDragDropFeature(app) {
     if (!app.runtime.dragData || isExternalFileDrag(event)) return;
     const tiles = Array.from(grid.querySelectorAll(".tile"));
     const isCrossGroup = app.runtime.dragData.fromGroupId !== grid.dataset.groupId;
+    grid.classList.toggle("drop-empty", !tiles.length);
     if (!tiles.length) {
       clearDropIndicator();
       return;

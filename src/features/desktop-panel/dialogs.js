@@ -63,6 +63,22 @@ export function registerDialogFeature(app) {
     app.refs.cancelSettingsDialog.addEventListener("click", () => closeDialog(app.refs.settingsDialog));
     app.refs.cancelEditDialog.addEventListener("click", () => closeDialog(app.refs.editDialog));
 
+    app.refs.searchInput?.addEventListener("input", () => {
+      app.setSearchQuery(app.refs.searchInput.value);
+    });
+    app.refs.searchInput?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      const firstTile = app.refs.groupsContainer.querySelector(".tile");
+      if (!(firstTile instanceof HTMLElement)) return;
+      event.preventDefault();
+      const item = app.findItem(firstTile.dataset.groupId, firstTile.dataset.itemId);
+      if (item) app.openItem(item.id, item.url);
+    });
+    app.refs.clearSearchButton?.addEventListener("click", () => {
+      app.setSearchQuery("");
+      app.refs.searchInput?.focus();
+    });
+
     app.refs.addForm.addEventListener("submit", (event) => {
       event.preventDefault();
       const formData = new FormData(app.refs.addForm);
@@ -263,6 +279,13 @@ export function registerDialogFeature(app) {
       app.render();
     });
 
+    app.refs.showSearchInput?.addEventListener("change", () => {
+      app.store.state.layout.showSearch = app.refs.showSearchInput.checked;
+      if (!app.store.state.layout.showSearch) app.runtime.searchQuery = "";
+      app.saveState();
+      app.render();
+    });
+
     app.refs.layoutDirectionInput.addEventListener("change", () => {
       app.store.state.layout.flowDirection = app.refs.layoutDirectionInput.value === "rtl" ? "rtl" : "ltr";
       app.applyLayout();
@@ -412,6 +435,7 @@ export function registerDialogFeature(app) {
     );
     app.refs.showAddTileInput.checked = !!app.store.state.layout.showAddTile;
     app.refs.showGroupTitleInput.checked = !!app.store.state.layout.showGroupTitle;
+    if (app.refs.showSearchInput) app.refs.showSearchInput.checked = app.store.state.layout.showSearch !== false;
     app.refs.layoutDirectionInput.value = app.store.state.layout.flowDirection === "rtl" ? "rtl" : "ltr";
     app.refs.trackCountInput.value = String(app.store.state.layout.trackCount);
     app.updateTrackCountHint();

@@ -1,7 +1,7 @@
 const path = require("path");
 const { test, expect } = require("@playwright/test");
 
-const STORAGE_KEY = "desktop-panel-state-v7";
+const STORAGE_KEY = "desktop-panel-state-v8";
 const mockScriptPath = path.join(__dirname, "helpers", "mockDesktopPanel.js");
 
 function svgIconDataUrl(text, color = "#1d4ed8") {
@@ -18,6 +18,14 @@ async function gotoApp(page) {
   await page.addInitScript({ path: mockScriptPath });
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.locator(".tile")).toHaveCount(2);
+}
+
+async function gotoAppWithState(page, state) {
+  await page.addInitScript({ path: mockScriptPath });
+  await page.addInitScript(({ storageKey, nextState }) => {
+    window.localStorage.setItem(storageKey, JSON.stringify(nextState));
+  }, { storageKey: STORAGE_KEY, nextState: state });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
 }
 
 async function openAppContextMenu(page) {
@@ -155,6 +163,103 @@ test("reorders items through drag and drop without opening them", async ({ page 
   }).toEqual(["腾讯视频", "知乎"]);
   await expect.poll(async () => page.locator(".tile .label").allTextContents()).toEqual(["腾讯视频", "知乎"]);
   await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.openUrl)).toEqual([]);
+});
+
+test("filters items, opens the first search result, and records recent items", async ({ page }) => {
+  await gotoAppWithState(page, {
+    layout: {
+      iconSize: 58,
+      windowWidth: 360,
+      showGroupTitle: true,
+      showAddTile: false,
+      flowDirection: "ltr",
+      trackCount: 3
+    },
+    ui: {
+      collapsedGroupIds: [],
+      recentItemIds: []
+    },
+    app: { snapToEdge: true },
+    groups: [
+      {
+        id: "dev-group",
+        name: "Dev",
+        items: [
+          { id: "github-item", title: "GitHub", description: "code hosting", url: "https://github.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "docs-item", title: "Docs", description: "reference", url: "https://docs.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      },
+      {
+        id: "mail-group",
+        name: "Mail",
+        items: [
+          { id: "gmail-item", title: "Gmail", description: "mail inbox", url: "https://mail.google.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+  await expect(page.locator(".tile")).toHaveCount(3);
+
+  await page.fill("#searchInput", "github");
+  await expect(page.locator(".tile .label")).toHaveText(["GitHub"]);
+
+  await page.keyboard.press("Enter");
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.openUrl)).toEqual([
+    "https://github.com"
+  ]);
+
+  await page.click("#clearSearchButton");
+  await expect(page.locator(".recent-group .tile .label")).toHaveText(["GitHub"]);
+});
+
+test("can hide the search box from settings", async ({ page }) => {
+  await gotoApp(page);
+  await expect(page.locator(".quick-panel")).toBeVisible();
+
+  await page.fill("#searchInput", "zhihu");
+  await expect(page.locator(".tile")).toHaveCount(1);
+
+  await openSettings(page);
+  await page.uncheck("#showSearchInput");
+  await expect(page.locator(".quick-panel")).toBeHidden();
+  await expect(page.locator(".tile")).toHaveCount(2);
+
+  await expect.poll(async () => (await getStoredState(page)).layout.showSearch).toBe(false);
+});
+
+test("persists collapsed groups and expands them on search", async ({ page }) => {
+  await gotoAppWithState(page, {
+    layout: {
+      iconSize: 58,
+      windowWidth: 360,
+      showGroupTitle: true,
+      showAddTile: false,
+      flowDirection: "ltr",
+      trackCount: 3
+    },
+    ui: {
+      collapsedGroupIds: [],
+      recentItemIds: []
+    },
+    app: { snapToEdge: true },
+    groups: [
+      {
+        id: "dev-group",
+        name: "Dev",
+        items: [
+          { id: "github-item", title: "GitHub", description: "code hosting", url: "https://github.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+
+  await page.locator('.group[data-group-id="dev-group"] .group-collapse-toggle').click();
+  await expect(page.locator('.group[data-group-id="dev-group"] .group-grid')).toBeHidden();
+  await expect.poll(async () => (await getStoredState(page)).ui.collapsedGroupIds).toEqual(["dev-group"]);
+
+  await page.fill("#searchInput", "github");
+  await expect(page.locator('.group[data-group-id="dev-group"] .group-grid')).toBeVisible();
+  await expect(page.locator(".tile .label")).toHaveText(["GitHub"]);
 });
 
 test("snaps the window only after the drag interaction finishes", async ({ page }) => {

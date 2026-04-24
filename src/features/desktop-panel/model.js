@@ -1,5 +1,5 @@
-export const STORAGE_KEY = "desktop-panel-state-v7";
-export const LEGACY_STORAGE_KEYS = ["desktop-panel-state-v6"];
+export const STORAGE_KEY = "desktop-panel-state-v8";
+export const LEGACY_STORAGE_KEYS = ["desktop-panel-state-v7", "desktop-panel-state-v6"];
 export const DEFAULT_GROUP_ID = "group-default";
 export const NEW_AUTO_GROUP = "__new_auto_group__";
 export const TRACK_COUNT_MIN = 1;
@@ -22,8 +22,13 @@ export function createDefaultState() {
       windowWidth: 360,
       showGroupTitle: true,
       showAddTile: false,
+      showSearch: true,
       flowDirection: "ltr",
       trackCount: 3
+    },
+    ui: {
+      collapsedGroupIds: [],
+      recentItemIds: []
     },
     app: { snapToEdge: true },
     groups: [
@@ -77,12 +82,22 @@ export function hydrateState(parsed) {
     windowWidth: clampNumber(parsed?.layout?.windowWidth, WINDOW_WIDTH_MIN, WINDOW_WIDTH_MAX, 360),
     showGroupTitle: parsed?.layout?.showGroupTitle !== false,
     showAddTile: parsed?.layout?.showAddTile === true,
+    showSearch: parsed?.layout?.showSearch !== false,
     flowDirection: parsed?.layout?.flowDirection === "rtl" ? "rtl" : "ltr",
     trackCount: clampNumber(parsed?.layout?.trackCount, TRACK_COUNT_MIN, TRACK_COUNT_MAX, 3)
   };
 
   const appConfig = {
     snapToEdge: parsed?.app?.snapToEdge !== false
+  };
+
+  const ui = {
+    collapsedGroupIds: Array.isArray(parsed?.ui?.collapsedGroupIds)
+      ? parsed.ui.collapsedGroupIds.filter((id) => typeof id === "string")
+      : [],
+    recentItemIds: Array.isArray(parsed?.ui?.recentItemIds)
+      ? parsed.ui.recentItemIds.filter((id) => typeof id === "string").slice(0, 10)
+      : []
   };
 
   const groups = Array.isArray(parsed?.groups)
@@ -103,12 +118,16 @@ export function hydrateState(parsed) {
     groups.push(structuredClone(createDefaultState().groups[0]));
   }
 
-  return { layout, app: appConfig, groups };
+  ui.collapsedGroupIds = ui.collapsedGroupIds.filter((id) => groups.some((group) => group.id === id));
+  ui.recentItemIds = ui.recentItemIds.filter((id) => groups.some((group) => group.items.some((item) => item.id === id)));
+
+  return { layout, ui, app: appConfig, groups };
 }
 
 export function migrateFromLegacyArray(items) {
   return {
     layout: structuredClone(createDefaultState().layout),
+    ui: structuredClone(createDefaultState().ui),
     app: structuredClone(createDefaultState().app),
     groups: [
       {

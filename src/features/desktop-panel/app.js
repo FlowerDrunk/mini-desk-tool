@@ -41,6 +41,7 @@ export function createDesktopPanelApp({ desktopPanel = window.desktopPanel } = {
       addDialogSource: "tile",
       dropIndicator: null,
       dragToastTimer: null,
+      searchQuery: "",
       pendingEditOriginalIconUrl: "",
       iconPickers: {
         add: createIconPickerState({
@@ -62,6 +63,17 @@ export function createDesktopPanelApp({ desktopPanel = window.desktopPanel } = {
     findGroup: (groupId) => findGroup(app.store, groupId),
     findItem: (groupId, itemId) => findItem(app.store, groupId, itemId),
     findItemById: (itemId) => findItemById(app.store, itemId),
+    rememberItem(itemId) {
+      if (!itemId || !app.findItemById(itemId)) return;
+      const recent = app.store.state.ui.recentItemIds.filter((id) => id !== itemId);
+      recent.unshift(itemId);
+      app.store.state.ui.recentItemIds = recent.slice(0, 10);
+      app.saveState();
+    },
+    openItem(itemId, url) {
+      app.rememberItem(itemId);
+      app.openUrl(url);
+    },
     openUrl(url) {
       if (!url) return;
       if (app.desktopPanel?.openUrl) {
@@ -101,6 +113,8 @@ function createRefs() {
     appShell: document.querySelector("#appShell"),
     windowDragBand: document.querySelector("#windowDragBand"),
     workspace: document.querySelector("#workspace"),
+    searchInput: document.querySelector("#searchInput"),
+    clearSearchButton: document.querySelector("#clearSearchButton"),
     groupsContainer: document.querySelector("#groups"),
     itemTemplate: document.querySelector("#itemTemplate"),
     addDialog: document.querySelector("#addDialog"),
@@ -119,6 +133,7 @@ function createRefs() {
     windowWidthInput: document.querySelector("#windowWidthInput"),
     showAddTileInput: document.querySelector("#showAddTileInput"),
     showGroupTitleInput: document.querySelector("#showGroupTitleInput"),
+    showSearchInput: document.querySelector("#showSearchInput"),
     layoutDirectionInput: document.querySelector("#layoutDirectionInput"),
     trackCountInput: document.querySelector("#trackCountInput"),
     trackCountHint: document.querySelector("#trackCountHint"),
