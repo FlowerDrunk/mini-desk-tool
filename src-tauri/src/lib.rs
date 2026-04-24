@@ -29,6 +29,7 @@ const WINDOW_MARGIN_RIGHT: f64 = 16.0;
 const SNAP_DISTANCE: f64 = 14.0;
 const SNAP_RELEASE_DISTANCE: f64 = 26.0;
 const SNAP_IDLE_DELAY_MS: u64 = 120;
+const SHORTCUT_SCAN_LIMIT: usize = 300;
 const USER_AGENT_VALUE: &str =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const ICONFONT_RESULT_LIMIT: usize = 12;
@@ -325,6 +326,22 @@ async fn resolve_dropped_paths(paths: Vec<String>) -> Result<Vec<ResolvedShortcu
 }
 
 #[tauri::command]
+async fn scan_shortcut_locations(sources: Vec<String>) -> Result<Vec<ResolvedShortcut>, String> {
+    let roots = collect_shortcut_scan_roots(&sources);
+    let mut resolved = Vec::new();
+    let mut seen_targets = HashSet::new();
+
+    for root in roots {
+        scan_shortcut_directory(&root, &mut resolved, &mut seen_targets)?;
+        if resolved.len() >= SHORTCUT_SCAN_LIMIT {
+            break;
+        }
+    }
+
+    Ok(resolved)
+}
+
+#[tauri::command]
 async fn search_icon_suggestions(query: String) -> Result<Vec<IconSuggestion>, String> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
@@ -464,6 +481,7 @@ pub fn run() {
             set_snap_enabled,
             set_window_size,
             resolve_dropped_paths,
+            scan_shortcut_locations,
             search_icon_suggestions,
             search_official_url,
             snap_window_after_drag,
@@ -954,6 +972,96 @@ fn resolve_dropped_path(path: &Path) -> Result<Option<ResolvedShortcut>, String>
         "url" => resolve_internet_shortcut(path).or_else(|_| resolve_regular_entry(path)),
         _ => resolve_regular_entry(path),
     }
+}
+
+fn collect_shortcut_scan_roots(sources: &[String]) -> Vec<PathBuf> {
+    let include_all = sources.is_empty();
+    let normalized = sources
+        .iter()
+        .map(|source| source.trim().to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let mut roots = Vec::new();
+
+    if include_all || normalized.contains("desktop") {
+        if let Some(path) = dirs::desktop_dir() {
+            roots.push(path);
+        }
+        if let Ok(public_dir) = std::env::var("PUBLIC") {
+            roots.push(PathBuf::from(public_dir).join("Desktop"));
+        }
+    }
+
+    if include_all || normalized.contains("startmenu") || normalized.contains("start-menu") {
+        if let Some(data_dir) = dirs::data_dir() {
+            roots.push(
+                data_dir
+                    .join("Microsoft")
+                    .join("Windows")
+                    .join("Start Menu")
+                    .join("Programs"),
+            );
+        }
+        if let Ok(program_data) = std::env::var("PROGRAMDATA") {
+            roots.push(
+                PathBuf::from(program_data)
+                    .join("Microsoft")
+                    .join("Windows")
+                    .join("Start Menu")
+                    .join("Programs"),
+            );
+        }
+    }
+
+    let mut seen = HashSet::new();
+    roots
+        .into_iter()
+        .filter(|path| seen.insert(path.to_string_lossy().to_ascii_lowercase()))
+        .collect()
+}
+
+fn scan_shortcut_directory(
+    dir: &Path,
+    resolved: &mut Vec<ResolvedShortcut>,
+    seen_targets: &mut HashSet<String>,
+) -> Result<(), String> {
+    if resolved.len() >= SHORTCUT_SCAN_LIMIT || !dir.exists() {
+        return Ok(());
+    }
+
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Ok(());
+    };
+
+    for entry in entries.flatten() {
+        if resolved.len() >= SHORTCUT_SCAN_LIMIT {
+            break;
+        }
+
+        let path = entry.path();
+        if path.is_dir() {
+            scan_shortcut_directory(&path, resolved, seen_targets)?;
+            continue;
+        }
+
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if extension != "lnk" && extension != "url" {
+            continue;
+        }
+
+        if let Some(shortcut) = resolve_dropped_path(&path)? {
+            let key = shortcut.url.trim().to_ascii_lowercase();
+            if key.is_empty() || !seen_targets.insert(key) {
+                continue;
+            }
+            resolved.push(shortcut);
+        }
+    }
+
+    Ok(())
 }
 
 fn resolve_windows_shortcut(path: &Path) -> Result<Option<ResolvedShortcut>, String> {

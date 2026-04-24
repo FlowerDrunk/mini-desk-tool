@@ -42,6 +42,9 @@ export function createDesktopPanelApp({ desktopPanel = window.desktopPanel } = {
       dropIndicator: null,
       dragToastTimer: null,
       searchQuery: "",
+      recentPage: 0,
+      selectedItemIds: new Set(),
+      selectionAnchorGroupId: null,
       pendingEditOriginalIconUrl: "",
       iconPickers: {
         add: createIconPickerState({
@@ -68,11 +71,13 @@ export function createDesktopPanelApp({ desktopPanel = window.desktopPanel } = {
       const recent = app.store.state.ui.recentItemIds.filter((id) => id !== itemId);
       recent.unshift(itemId);
       app.store.state.ui.recentItemIds = recent.slice(0, 10);
+      app.runtime.recentPage = 0;
       app.saveState();
     },
     openItem(itemId, url) {
       app.rememberItem(itemId);
       app.openUrl(url);
+      if (app.store.state.layout.showRecent !== false) app.render();
     },
     openUrl(url) {
       if (!url) return;
@@ -115,6 +120,16 @@ function createRefs() {
     workspace: document.querySelector("#workspace"),
     searchInput: document.querySelector("#searchInput"),
     clearSearchButton: document.querySelector("#clearSearchButton"),
+    batchToolbar: document.querySelector("#batchToolbar"),
+    batchCount: document.querySelector("#batchCount"),
+    batchGroupSelect: document.querySelector("#batchGroupSelect"),
+    batchSizeSelect: document.querySelector("#batchSizeSelect"),
+    batchSelectGroupButton: document.querySelector("#batchSelectGroupButton"),
+    batchSelectAllButton: document.querySelector("#batchSelectAllButton"),
+    batchMoveButton: document.querySelector("#batchMoveButton"),
+    batchResizeButton: document.querySelector("#batchResizeButton"),
+    batchDeleteButton: document.querySelector("#batchDeleteButton"),
+    batchClearButton: document.querySelector("#batchClearButton"),
     groupsContainer: document.querySelector("#groups"),
     itemTemplate: document.querySelector("#itemTemplate"),
     addDialog: document.querySelector("#addDialog"),
@@ -133,13 +148,17 @@ function createRefs() {
     windowWidthInput: document.querySelector("#windowWidthInput"),
     showAddTileInput: document.querySelector("#showAddTileInput"),
     showGroupTitleInput: document.querySelector("#showGroupTitleInput"),
+    showItemLabelInput: document.querySelector("#showItemLabelInput"),
     showSearchInput: document.querySelector("#showSearchInput"),
+    showRecentInput: document.querySelector("#showRecentInput"),
     layoutDirectionInput: document.querySelector("#layoutDirectionInput"),
     trackCountInput: document.querySelector("#trackCountInput"),
     trackCountHint: document.querySelector("#trackCountHint"),
     snapEdgeInput: document.querySelector("#snapEdgeInput"),
     launchAtLoginInput: document.querySelector("#launchAtLoginInput"),
     dragToast: document.querySelector("#dragToast"),
+    importDesktopButton: document.querySelector("#importDesktopButton"),
+    importStartMenuButton: document.querySelector("#importStartMenuButton"),
     exportDataButton: document.querySelector("#exportDataButton"),
     importDataButton: document.querySelector("#importDataButton"),
     autoGroupButton: document.querySelector("#autoGroupButton"),

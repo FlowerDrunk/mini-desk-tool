@@ -22,6 +22,13 @@ Mini Desk Tool is a lightweight Tauri desktop panel for Windows. It stays attach
 - Automatic grouping based on title, description, and hostname.
 - Launch at login option in the settings dialog.
 
+## v1.3.0
+
+- Added bulk import from Desktop and Start Menu shortcuts.
+- Added multi-select for launcher items.
+- Added batch move, resize, delete, and clear-selection actions.
+- Added native shortcut location scanning in the Tauri backend.
+
 ## v1.2.0
 
 - Added a top search box for filtering by title, description, URL, path, and group name.

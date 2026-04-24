@@ -17,6 +17,22 @@
         <input id="searchInput" class="search-input" type="search" placeholder="搜索名称、描述、网址或路径" autocomplete="off" />
         <button id="clearSearchButton" class="search-clear" type="button" aria-label="清空搜索" hidden>×</button>
       </section>
+      <section id="batchToolbar" class="batch-toolbar no-drag" hidden>
+        <span id="batchCount" class="batch-count">已选择 0 项</span>
+        <button id="batchSelectGroupButton" type="button">全选本组</button>
+        <button id="batchSelectAllButton" type="button">全选全部</button>
+        <select id="batchGroupSelect" aria-label="批量移动到分组"></select>
+        <select id="batchSizeSelect" aria-label="批量调整大小">
+          <option value="1x1">1x1</option>
+          <option value="2x1">2x1</option>
+          <option value="1x2">1x2</option>
+          <option value="2x2">2x2</option>
+        </select>
+        <button id="batchMoveButton" type="button">移动</button>
+        <button id="batchResizeButton" type="button">改大小</button>
+        <button id="batchDeleteButton" type="button">删除</button>
+        <button id="batchClearButton" type="button">取消</button>
+      </section>
       <section id="groups" class="groups"></section>
     </main>
   </div>
@@ -89,8 +105,18 @@
       </label>
 
       <label class="checkbox">
+        <input id="showItemLabelInput" name="showItemLabel" type="checkbox" />
+        显示名称
+      </label>
+
+      <label class="checkbox">
         <input id="showSearchInput" name="showSearch" type="checkbox" />
         显示搜索框
+      </label>
+
+      <label class="checkbox">
+        <input id="showRecentInput" name="showRecent" type="checkbox" />
+        显示最近打开
       </label>
 
       <label>
@@ -118,6 +144,8 @@
       </label>
 
       <div class="settings-actions">
+        <button id="importDesktopButton" type="button">导入桌面</button>
+        <button id="importStartMenuButton" type="button" hidden>导入开始菜单</button>
         <button id="exportDataButton" type="button">导出数据</button>
         <button id="importDataButton" type="button">导入数据</button>
         <button id="autoGroupButton" type="button">自动分组</button>

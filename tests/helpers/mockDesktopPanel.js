@@ -8,6 +8,7 @@
     officialUrls: {},
     iconSuggestions: {},
     droppedShortcutsByPath: {},
+    shortcutLocations: {},
     nativeDragDropHandler: null,
     calls: {
       closeWindow: [],
@@ -16,6 +17,7 @@
       importStateFile: [],
       openUrl: [],
       resolveDroppedPaths: [],
+      scanShortcutLocations: [],
       searchIconSuggestions: [],
       searchOfficialUrl: [],
       setDropAccepting: [],
@@ -41,6 +43,9 @@
     },
     setDroppedShortcut(filePath, shortcut) {
       state.droppedShortcutsByPath[String(filePath)] = shortcut;
+    },
+    setShortcutLocation(source, shortcuts) {
+      state.shortcutLocations[normalize(source)] = Array.isArray(shortcuts) ? shortcuts : [];
     },
     emitNativeDragDrop(payload) {
       if (typeof state.nativeDragDropHandler === "function") {
@@ -92,6 +97,13 @@
         paths
           .map((filePath) => state.droppedShortcutsByPath[filePath] || null)
           .filter(Boolean)
+      );
+    },
+    scanShortcutLocations(sources) {
+      const requested = Array.isArray(sources) && sources.length ? sources.map((entry) => String(entry)) : ["desktop", "startMenu"];
+      state.calls.scanShortcutLocations.push(requested);
+      return Promise.resolve(
+        requested.flatMap((source) => state.shortcutLocations[normalize(source)] || [])
       );
     },
     searchIconSuggestions(query) {

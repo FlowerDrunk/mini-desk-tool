@@ -11,6 +11,7 @@ export function registerDragDropFeature(app) {
   app.getDropIndex = getDropIndex;
   app.importDroppedPaths = importDroppedPaths;
   app.importDroppedFiles = importDroppedFiles;
+  app.addResolvedShortcutsToGroup = addResolvedShortcutsToGroup;
   app.getDropTargetFromPosition = getDropTargetFromPosition;
   app.clearAllDropTargets = clearAllDropTargets;
   app.bindExternalShortcutDrop = bindExternalShortcutDrop;
@@ -153,11 +154,16 @@ export function registerDragDropFeature(app) {
     }
 
     const target = document.elementFromPoint(x, y);
-    const dropGrid = target?.closest(".group-grid") || null;
+    const dropGrid = getRealDropGrid(target);
     const groupSection = dropGrid?.closest(".group") || null;
     const targetGroupId = dropGrid?.dataset.groupId || DEFAULT_GROUP;
     const dropIndex = dropGrid ? getDropIndex(dropGrid, { clientX: x, clientY: y }) : undefined;
     return { dropGrid, targetGroupId, dropIndex, groupSection };
+  }
+
+  function getRealDropGrid(target) {
+    const dropGrid = target?.closest?.(".group-grid") || null;
+    return dropGrid?.dataset.recent === "true" ? null : dropGrid;
   }
 
   async function addResolvedShortcutsToGroup(targetGroupId, shortcuts, dropIndex) {
@@ -263,8 +269,8 @@ export function registerDragDropFeature(app) {
       app.runtime.externalDragDepth = 0;
       clearAllDropTargets();
 
-      const targetGroupId = event.target.closest(".group-grid")?.dataset.groupId || DEFAULT_GROUP;
-      const dropGrid = event.target.closest(".group-grid");
+      const dropGrid = getRealDropGrid(event.target);
+      const targetGroupId = dropGrid?.dataset.groupId || DEFAULT_GROUP;
       const dropIndex = dropGrid ? getDropIndex(dropGrid, event) : undefined;
       await importDroppedPaths(event, targetGroupId, dropIndex);
     };
@@ -323,10 +329,6 @@ export function registerDragDropFeature(app) {
     const [moved] = fromGroup.items.splice(fromIndex, 1);
     const safeIndex = clampNumber(normalizedDropIndex, 0, toGroup.items.length, toGroup.items.length);
     toGroup.items.splice(safeIndex, 0, moved);
-
-    if (!fromGroup.items.length && fromGroup.id !== DEFAULT_GROUP_ID) {
-      app.store.state.groups = app.store.state.groups.filter((group) => group.id !== fromGroup.id);
-    }
 
     app.saveState();
     if (shouldRender) app.render();

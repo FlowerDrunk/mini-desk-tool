@@ -78,6 +78,22 @@ export function registerDialogFeature(app) {
       app.setSearchQuery("");
       app.refs.searchInput?.focus();
     });
+    app.refs.batchSelectGroupButton?.addEventListener("click", () => {
+      app.selectCurrentGroupItems();
+    });
+    app.refs.batchSelectAllButton?.addEventListener("click", () => {
+      app.selectAllItems();
+    });
+    app.refs.batchMoveButton?.addEventListener("click", () => {
+      app.moveSelectedItems(app.refs.batchGroupSelect?.value);
+    });
+    app.refs.batchResizeButton?.addEventListener("click", () => {
+      app.resizeSelectedItems(app.refs.batchSizeSelect?.value || "1x1");
+    });
+    app.refs.batchDeleteButton?.addEventListener("click", () => {
+      app.deleteSelectedItems();
+    });
+    app.refs.batchClearButton?.addEventListener("click", () => app.clearSelection());
 
     app.refs.addForm.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -182,6 +198,7 @@ export function registerDialogFeature(app) {
       const tile = event.target.closest(".tile");
       hideMenus();
       if (tile) {
+        if (tile.dataset.recentOnly === "true") return;
         app.runtime.activeItemContext = { groupId: tile.dataset.groupId, itemId: tile.dataset.itemId };
         openMenu(app.refs.itemContextMenu, event.clientX, event.clientY);
         return;
@@ -279,9 +296,22 @@ export function registerDialogFeature(app) {
       app.render();
     });
 
+    app.refs.showItemLabelInput?.addEventListener("change", () => {
+      app.store.state.layout.showItemLabel = app.refs.showItemLabelInput.checked;
+      app.applyLayout();
+      app.saveState();
+      app.render();
+    });
+
     app.refs.showSearchInput?.addEventListener("change", () => {
       app.store.state.layout.showSearch = app.refs.showSearchInput.checked;
       if (!app.store.state.layout.showSearch) app.runtime.searchQuery = "";
+      app.saveState();
+      app.render();
+    });
+
+    app.refs.showRecentInput?.addEventListener("change", () => {
+      app.store.state.layout.showRecent = app.refs.showRecentInput.checked;
       app.saveState();
       app.render();
     });
@@ -324,6 +354,8 @@ export function registerDialogFeature(app) {
 
     app.refs.exportDataButton?.addEventListener("click", () => void exportDataToFile());
     app.refs.importDataButton?.addEventListener("click", () => void importDataFromFile());
+    app.refs.importDesktopButton?.addEventListener("click", () => void importShortcutLocation("desktop"));
+    app.refs.importStartMenuButton?.addEventListener("click", () => void importShortcutLocation("startMenu"));
     app.refs.autoGroupButton.addEventListener("click", () => {
       autoGroupByContent();
       app.saveState();
@@ -435,7 +467,9 @@ export function registerDialogFeature(app) {
     );
     app.refs.showAddTileInput.checked = !!app.store.state.layout.showAddTile;
     app.refs.showGroupTitleInput.checked = !!app.store.state.layout.showGroupTitle;
+    if (app.refs.showItemLabelInput) app.refs.showItemLabelInput.checked = app.store.state.layout.showItemLabel !== false;
     if (app.refs.showSearchInput) app.refs.showSearchInput.checked = app.store.state.layout.showSearch !== false;
+    if (app.refs.showRecentInput) app.refs.showRecentInput.checked = app.store.state.layout.showRecent !== false;
     app.refs.layoutDirectionInput.value = app.store.state.layout.flowDirection === "rtl" ? "rtl" : "ltr";
     app.refs.trackCountInput.value = String(app.store.state.layout.trackCount);
     app.updateTrackCountHint();
@@ -531,6 +565,22 @@ export function registerDialogFeature(app) {
     });
   }
 
+  async function importShortcutLocation(source) {
+    try {
+      const shortcuts = (await app.desktopPanel?.scanShortcutLocations?.([source])) || [];
+      if (!Array.isArray(shortcuts) || !shortcuts.length) {
+        app.showDragToast("没有找到可导入的快捷方式");
+        return;
+      }
+
+      const targetGroupId = app.store.state.groups[0]?.id || DEFAULT_GROUP_ID;
+      await app.addResolvedShortcutsToGroup(targetGroupId, shortcuts);
+      app.showDragToast(`已导入 ${shortcuts.length} 个快捷方式`);
+    } catch {
+      app.showDragToast("批量导入失败，请稍后重试");
+    }
+  }
+
   function shouldAutoSearchOfficialLink(type) {
     return type === "add" && app.runtime.addDialogSource === "menu";
   }
@@ -539,9 +589,6 @@ export function registerDialogFeature(app) {
     const group = app.findGroup(groupId);
     if (!group) return;
     group.items = group.items.filter((item) => item.id !== itemId);
-    if (!group.items.length && group.id !== DEFAULT_GROUP_ID) {
-      app.store.state.groups = app.store.state.groups.filter((entry) => entry.id !== group.id);
-    }
     app.ensureValidGroups();
     app.saveState();
     app.render();

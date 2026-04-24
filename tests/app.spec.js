@@ -262,6 +262,86 @@ test("persists collapsed groups and expands them on search", async ({ page }) =>
   await expect(page.locator(".tile .label")).toHaveText(["GitHub"]);
 });
 
+test("imports shortcuts from desktop through settings", async ({ page }) => {
+  await gotoApp(page);
+  await page.evaluate(() => {
+    window.__desktopPanelMock.setShortcutLocation("desktop", [
+      { title: "Desktop App", url: "C:\\\\Tools\\\\DesktopApp.exe", shortcutIcon: "" },
+      { title: "Desktop Site", url: "https://desktop.example.com", shortcutIcon: "" }
+    ]);
+  });
+
+  await openSettings(page);
+  await page.click("#importDesktopButton");
+
+  await expect(page.locator(".tile .label")).toContainText(["Desktop App", "Desktop Site"]);
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.scanShortcutLocations)).toEqual([
+    ["desktop"]
+  ]);
+});
+
+test("batch moves, resizes, and deletes selected items", async ({ page }) => {
+  await gotoAppWithState(page, {
+    layout: {
+      iconSize: 58,
+      windowWidth: 360,
+      showGroupTitle: true,
+      showAddTile: false,
+      showSearch: true,
+      flowDirection: "ltr",
+      trackCount: 3
+    },
+    ui: {
+      collapsedGroupIds: [],
+      recentItemIds: []
+    },
+    app: { snapToEdge: true },
+    groups: [
+      {
+        id: "default-group",
+        name: "Default",
+        items: [
+          { id: "alpha-item", title: "Alpha", description: "", url: "https://alpha.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "beta-item", title: "Beta", description: "", url: "https://beta.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      },
+      {
+        id: "tools-group",
+        name: "Tools",
+        items: [
+          { id: "gamma-item", title: "Gamma", description: "", url: "https://gamma.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+
+  await page.locator('.tile[data-item-id="alpha-item"] .select-toggle').click();
+  await page.locator('.tile[data-item-id="beta-item"] .select-toggle').click();
+  await expect(page.locator("#batchToolbar")).toBeVisible();
+  await expect(page.locator("#batchCount")).toHaveText("已选择 2 项");
+
+  await page.selectOption("#batchGroupSelect", "tools-group");
+  await page.click("#batchMoveButton");
+  await expect.poll(async () => {
+    const state = await getStoredState(page);
+    return state.groups.find((group) => group.id === "tools-group").items.map((item) => item.title);
+  }).toEqual(["Gamma", "Alpha", "Beta"]);
+
+  await page.locator('.tile[data-item-id="alpha-item"] .select-toggle').click();
+  await page.selectOption("#batchSizeSelect", "2x2");
+  await page.click("#batchResizeButton");
+  await expect.poll(async () => {
+    const state = await getStoredState(page);
+    return state.groups.flatMap((group) => group.items).find((item) => item.id === "alpha-item").size;
+  }).toBe("2x2");
+
+  await page.click("#batchDeleteButton");
+  await expect.poll(async () => {
+    const state = await getStoredState(page);
+    return state.groups.flatMap((group) => group.items).map((item) => item.id);
+  }).toEqual(["gamma-item", "beta-item"]);
+});
+
 test("snaps the window only after the drag interaction finishes", async ({ page }) => {
   await gotoApp(page);
 

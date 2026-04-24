@@ -24,6 +24,14 @@ export function registerRenderFeature(app) {
   app.showDragToast = showDragToast;
   app.setSearchQuery = setSearchQuery;
   app.toggleGroupCollapsed = toggleGroupCollapsed;
+  app.toggleItemSelection = toggleItemSelection;
+  app.selectCurrentGroupItems = selectCurrentGroupItems;
+  app.selectAllItems = selectAllItems;
+  app.clearSelection = clearSelection;
+  app.moveSelectedItems = moveSelectedItems;
+  app.resizeSelectedItems = resizeSelectedItems;
+  app.deleteSelectedItems = deleteSelectedItems;
+  app.removeRecentItem = removeRecentItem;
 
   function applyLayout() {
     const iconSize = clampNumber(app.store.state.layout.iconSize, 42, 76, 58);
@@ -35,6 +43,7 @@ export function registerRenderFeature(app) {
     document.documentElement.style.setProperty("--tile-base-size", `${tileBase}px`);
     document.documentElement.style.setProperty("--track-count", String(trackCount));
     app.refs.appShell.dataset.flow = app.store.state.layout.flowDirection === "rtl" ? "rtl" : "ltr";
+    app.refs.appShell.dataset.showLabels = app.store.state.layout.showItemLabel === false ? "false" : "true";
     updateTrackCountHint();
   }
 
@@ -51,15 +60,17 @@ export function registerRenderFeature(app) {
 
   function render() {
     ensureValidGroups(app.store);
+    pruneSelection();
     if (!app.store.state.layout.showSearch) app.runtime.searchQuery = "";
     app.refs.groupsContainer.innerHTML = "";
     app.clearDropIndicator();
     syncSearchControls();
+    syncBatchToolbar();
 
     const query = normalizeSearchText(app.runtime.searchQuery);
     const isSearching = Boolean(query);
     const visibleGroups = buildVisibleGroups(query);
-    const recentItems = isSearching ? [] : getRecentItems();
+    const recentItems = isSearching || app.store.state.layout.showRecent === false ? [] : getRecentItems();
 
     if (recentItems.length) {
       app.refs.groupsContainer.appendChild(createRecentSection(recentItems));
@@ -170,17 +181,25 @@ export function registerRenderFeature(app) {
     render();
   }
 
-  function createItemNode(item, groupId, index) {
+  function createItemNode(item, groupId, index, { enableDrag = true, recentOnly = false } = {}) {
     const node = app.refs.itemTemplate.content.firstElementChild.cloneNode(true);
     node.draggable = false;
     node.dataset.itemId = item.id;
     node.dataset.groupId = groupId;
     node.dataset.index = String(index);
     node.dataset.size = item.size;
+    node.dataset.recentOnly = recentOnly ? "true" : "false";
+    node.classList.toggle("is-selected", app.runtime.selectedItemIds.has(item.id));
 
     const iconWrap = node.querySelector(".icon-wrap");
     const label = node.querySelector(".label");
     const deleteButton = node.querySelector(".delete");
+    const selectButton = document.createElement("button");
+    selectButton.type = "button";
+    selectButton.className = "select-toggle no-drag";
+    selectButton.setAttribute("aria-label", app.runtime.selectedItemIds.has(item.id) ? "取消选择" : "选择项目");
+    selectButton.textContent = app.runtime.selectedItemIds.has(item.id) ? "✓" : "";
+    node.insertBefore(selectButton, node.firstChild);
     const meta = SIZE_META[item.size] || SIZE_META["1x1"];
     const iconSize = Math.round(app.store.state.layout.iconSize);
     const tileBase = Math.max(84, iconSize + 28);
@@ -216,18 +235,35 @@ export function registerRenderFeature(app) {
         return;
       }
       if (event.target === deleteButton) return;
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        toggleItemSelection(item.id);
+        return;
+      }
       app.openItem(item.id, item.url);
+    });
+
+    selectButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleItemSelection(item.id);
     });
 
     deleteButton.addEventListener("click", (event) => {
       event.stopPropagation();
+      if (recentOnly) {
+        removeRecentItem(item.id);
+        return;
+      }
       app.removeItem(groupId, item.id);
     });
 
-    node.addEventListener("pointerdown", (event) => {
-      if (event.target === deleteButton) return;
-      app.startPointerDrag(event, item.id, groupId, node);
-    });
+    if (enableDrag) {
+      node.addEventListener("pointerdown", (event) => {
+        if (event.target === deleteButton) return;
+        app.startPointerDrag(event, item.id, groupId, node);
+      });
+    }
 
     if (iconWrap) iconWrap.style.pointerEvents = "none";
     if (label) label.style.pointerEvents = "none";
@@ -294,6 +330,128 @@ export function registerRenderFeature(app) {
     render();
   }
 
+  function toggleItemSelection(itemId) {
+    const located = app.findItemById(itemId);
+    if (!located) return;
+    app.runtime.selectionAnchorGroupId = located.group.id;
+    if (app.runtime.selectedItemIds.has(itemId)) {
+      app.runtime.selectedItemIds.delete(itemId);
+    } else {
+      app.runtime.selectedItemIds.add(itemId);
+    }
+    render();
+  }
+
+  function selectCurrentGroupItems() {
+    const group = getSelectionAnchorGroup();
+    if (!group) return;
+    group.items.forEach((item) => app.runtime.selectedItemIds.add(item.id));
+    app.runtime.selectionAnchorGroupId = group.id;
+    render();
+  }
+
+  function selectAllItems() {
+    app.store.state.groups.forEach((group) => {
+      group.items.forEach((item) => app.runtime.selectedItemIds.add(item.id));
+    });
+    const firstSelected = Array.from(app.runtime.selectedItemIds)[0];
+    const located = firstSelected ? app.findItemById(firstSelected) : null;
+    app.runtime.selectionAnchorGroupId = located?.group.id || null;
+    render();
+  }
+
+  function clearSelection() {
+    app.runtime.selectedItemIds.clear();
+    app.runtime.selectionAnchorGroupId = null;
+    render();
+  }
+
+  function removeRecentItem(itemId) {
+    app.store.state.ui.recentItemIds = app.store.state.ui.recentItemIds.filter((id) => id !== itemId);
+    app.runtime.recentPage = 0;
+    app.saveState();
+    render();
+  }
+
+  function pruneSelection() {
+    for (const itemId of Array.from(app.runtime.selectedItemIds)) {
+      if (!app.findItemById(itemId)) app.runtime.selectedItemIds.delete(itemId);
+    }
+    if (app.runtime.selectionAnchorGroupId && !app.findGroup(app.runtime.selectionAnchorGroupId)) {
+      app.runtime.selectionAnchorGroupId = null;
+    }
+  }
+
+  function getSelectionAnchorGroup() {
+    const anchor = app.runtime.selectionAnchorGroupId ? app.findGroup(app.runtime.selectionAnchorGroupId) : null;
+    if (anchor) return anchor;
+
+    for (const itemId of app.runtime.selectedItemIds) {
+      const located = app.findItemById(itemId);
+      if (located?.group) return located.group;
+    }
+
+    return null;
+  }
+
+  function syncBatchToolbar() {
+    const selectedCount = app.runtime.selectedItemIds.size;
+    if (!app.refs.batchToolbar) return;
+    app.refs.batchToolbar.hidden = selectedCount === 0;
+    if (app.refs.batchCount) app.refs.batchCount.textContent = `已选择 ${selectedCount} 项`;
+    if (app.refs.batchGroupSelect) {
+      const currentValue = app.refs.batchGroupSelect.value;
+      app.refs.batchGroupSelect.innerHTML = "";
+      app.store.state.groups.forEach((group) => {
+        const option = document.createElement("option");
+        option.value = group.id;
+        option.textContent = group.name;
+        app.refs.batchGroupSelect.appendChild(option);
+      });
+      if (currentValue && app.findGroup(currentValue)) app.refs.batchGroupSelect.value = currentValue;
+    }
+  }
+
+  function moveSelectedItems(targetGroupId) {
+    const targetGroup = app.findGroup(targetGroupId);
+    if (!targetGroup) return;
+    const selected = Array.from(app.runtime.selectedItemIds)
+      .map((itemId) => app.findItemById(itemId))
+      .filter(Boolean);
+
+    selected.forEach(({ group, item }) => {
+      app.moveItem(group.id, targetGroup.id, item.id, targetGroup.items.length, false);
+    });
+
+    app.runtime.selectedItemIds.clear();
+    app.runtime.selectionAnchorGroupId = null;
+    app.ensureValidGroups();
+    app.saveState();
+    render();
+  }
+
+  function resizeSelectedItems(size) {
+    if (!app.sizeMeta[size]) return;
+    for (const itemId of app.runtime.selectedItemIds) {
+      const located = app.findItemById(itemId);
+      if (located?.item) located.item.size = size;
+    }
+    app.saveState();
+    render();
+  }
+
+  function deleteSelectedItems() {
+    const selectedIds = new Set(app.runtime.selectedItemIds);
+    app.store.state.groups.forEach((group) => {
+      group.items = group.items.filter((item) => !selectedIds.has(item.id));
+    });
+    app.runtime.selectedItemIds.clear();
+    app.runtime.selectionAnchorGroupId = null;
+    app.ensureValidGroups();
+    app.saveState();
+    render();
+  }
+
   function syncSearchControls() {
     const showSearch = app.store.state.layout.showSearch !== false;
     app.refs.searchInput?.closest(".quick-panel")?.toggleAttribute("hidden", !showSearch);
@@ -327,7 +485,7 @@ export function registerRenderFeature(app) {
         const items = query ? group.items.filter((item) => matchesSearch(group, item, query)) : group.items;
         return { group, items };
       })
-      .filter(({ group, items }) => items.length || (!query && group.id === app.store.state.groups[0]?.id));
+      .filter(({ items }) => !query || items.length);
   }
 
   function matchesSearch(group, item, query) {
@@ -342,13 +500,18 @@ export function registerRenderFeature(app) {
     return app.store.state.ui.recentItemIds
       .map((itemId) => app.findItemById(itemId))
       .filter(Boolean)
-      .map(({ group, item }) => ({ group, item }))
-      .slice(0, 8);
+      .map(({ group, item }) => ({ group, item }));
   }
 
   function createRecentSection(recentItems) {
     const section = document.createElement("section");
     section.className = "group recent-group";
+    const pageSize = clampNumber(app.store.state.layout.trackCount, TRACK_COUNT_MIN, TRACK_COUNT_MAX, 3);
+    const pageCount = Math.max(1, Math.ceil(recentItems.length / pageSize));
+    const currentPage = clampNumber(Math.trunc(app.runtime.recentPage || 0), 0, pageCount - 1, 0);
+    const startIndex = currentPage * pageSize;
+    const pageItems = recentItems.slice(startIndex, startIndex + pageSize);
+    app.runtime.recentPage = currentPage;
 
     const title = document.createElement("div");
     title.className = "group-title";
@@ -357,18 +520,52 @@ export function registerRenderFeature(app) {
     name.textContent = "最近打开";
     const meta = document.createElement("span");
     meta.className = "group-title-meta";
-    meta.textContent = String(recentItems.length);
+    meta.textContent =
+      pageCount > 1 ? `${startIndex + 1}-${startIndex + pageItems.length}/${recentItems.length}` : String(recentItems.length);
     title.append(name, meta);
+
+    if (pageCount > 1) {
+      const pager = document.createElement("div");
+      pager.className = "recent-pager no-drag";
+      pager.append(
+        createRecentPageButton("上一页", "‹", currentPage <= 0, () => {
+          app.runtime.recentPage = Math.max(0, currentPage - 1);
+          render();
+        }),
+        createRecentPageButton("下一页", "›", currentPage >= pageCount - 1, () => {
+          app.runtime.recentPage = Math.min(pageCount - 1, currentPage + 1);
+          render();
+        })
+      );
+      title.appendChild(pager);
+    }
+
     section.appendChild(title);
 
     const grid = document.createElement("div");
     grid.className = "group-grid recent-grid";
-    recentItems.forEach(({ group, item }) => {
+    grid.dataset.recent = "true";
+    pageItems.forEach(({ group, item }) => {
       const index = group.items.findIndex((entry) => entry.id === item.id);
-      grid.appendChild(createItemNode(item, group.id, index));
+      grid.appendChild(createItemNode(item, group.id, index, { enableDrag: false, recentOnly: true }));
     });
     section.appendChild(grid);
     return section;
+  }
+
+  function createRecentPageButton(label, text, disabled, onClick) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "recent-page-button no-drag";
+    button.disabled = disabled;
+    button.setAttribute("aria-label", label);
+    button.textContent = text;
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onClick();
+    });
+    return button;
   }
 
   function createEmptyState(isSearching) {

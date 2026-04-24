@@ -21,8 +21,10 @@ export function createDefaultState() {
       iconSize: 58,
       windowWidth: 360,
       showGroupTitle: true,
+      showItemLabel: true,
       showAddTile: false,
       showSearch: true,
+      showRecent: true,
       flowDirection: "ltr",
       trackCount: 3
     },
@@ -81,8 +83,10 @@ export function hydrateState(parsed) {
     iconSize: clampNumber(parsed?.layout?.iconSize, 42, 76, 58),
     windowWidth: clampNumber(parsed?.layout?.windowWidth, WINDOW_WIDTH_MIN, WINDOW_WIDTH_MAX, 360),
     showGroupTitle: parsed?.layout?.showGroupTitle !== false,
+    showItemLabel: parsed?.layout?.showItemLabel !== false,
     showAddTile: parsed?.layout?.showAddTile === true,
     showSearch: parsed?.layout?.showSearch !== false,
+    showRecent: parsed?.layout?.showRecent !== false,
     flowDirection: parsed?.layout?.flowDirection === "rtl" ? "rtl" : "ltr",
     trackCount: clampNumber(parsed?.layout?.trackCount, TRACK_COUNT_MIN, TRACK_COUNT_MAX, 3)
   };
@@ -111,11 +115,10 @@ export function hydrateState(parsed) {
                 .map((item) => normalizeItem(item))
             : []
         }))
-        .filter((group) => group.items.length || group.id === DEFAULT_GROUP_ID)
     : [];
 
   if (!groups.length) {
-    groups.push(structuredClone(createDefaultState().groups[0]));
+    groups.push({ id: DEFAULT_GROUP_ID, name: "常用", items: [] });
   }
 
   ui.collapsedGroupIds = ui.collapsedGroupIds.filter((id) => groups.some((group) => group.id === id));
@@ -178,13 +181,28 @@ export function extractImportedState(payload) {
 }
 
 export function ensureValidGroups(store) {
+  if (!Array.isArray(store.state.groups)) {
+    store.state.groups = [];
+  }
   store.state.groups = store.state.groups.filter((group) => Array.isArray(group.items));
   if (!store.state.groups.length) {
     store.state.groups.push({ id: DEFAULT_GROUP_ID, name: "常用", items: [] });
   }
-  if (!store.state.groups.some((group) => group.id === DEFAULT_GROUP_ID)) {
-    store.state.groups.unshift({ id: DEFAULT_GROUP_ID, name: "常用", items: [] });
+  pruneUiState(store);
+}
+
+function pruneUiState(store) {
+  if (!store.state.ui || typeof store.state.ui !== "object") {
+    store.state.ui = structuredClone(createDefaultState().ui);
   }
+  const groupIds = new Set(store.state.groups.map((group) => group.id));
+  const itemIds = new Set(store.state.groups.flatMap((group) => group.items.map((item) => item.id)));
+  store.state.ui.collapsedGroupIds = Array.isArray(store.state.ui.collapsedGroupIds)
+    ? store.state.ui.collapsedGroupIds.filter((id) => groupIds.has(id))
+    : [];
+  store.state.ui.recentItemIds = Array.isArray(store.state.ui.recentItemIds)
+    ? store.state.ui.recentItemIds.filter((id) => itemIds.has(id)).slice(0, 10)
+    : [];
 }
 
 export function findGroup(store, groupId) {
