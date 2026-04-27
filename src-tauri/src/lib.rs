@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     menu::MenuBuilder,
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    AppHandle, LogicalPosition, LogicalSize, Manager, Position, Size, State, WebviewWindow, Window,
-    WindowEvent,
+    AppHandle, LogicalPosition, LogicalSize, Manager, Monitor, Position, Size, State,
+    WebviewWindow, Window, WindowEvent,
 };
 #[cfg(desktop)]
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
@@ -26,8 +26,10 @@ const MIN_WIDTH: f64 = 300.0;
 const MIN_HEIGHT: f64 = 460.0;
 const WINDOW_MARGIN_TOP: f64 = 0.0;
 const WINDOW_MARGIN_RIGHT: f64 = 16.0;
-const SNAP_DISTANCE: f64 = 14.0;
-const SNAP_RELEASE_DISTANCE: f64 = 26.0;
+const DEFAULT_SNAP_DISTANCE: f64 = 14.0;
+const DEFAULT_REVEAL_DELAY_MS: u64 = 250;
+const EDGE_WATCH_INTERVAL_MS: u64 = 90;
+const SNAP_RELEASE_PADDING: f64 = 12.0;
 const SNAP_IDLE_DELAY_MS: u64 = 120;
 const SHORTCUT_SCAN_LIMIT: usize = 300;
 const USER_AGENT_VALUE: &str =
@@ -49,14 +51,34 @@ struct WindowRuntimeState {
     adjusting_position: bool,
     snapped_x: Option<SnapTarget>,
     snapped_y: Option<SnapTarget>,
+    snap_edge: SnapEdge,
+    snap_distance: f64,
+    auto_hide_enabled: bool,
+    reveal_delay_ms: u64,
+    edge_watcher_revision: u64,
     move_revision: u64,
     is_quitting: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SnapTarget {
     Min,
     Max,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SnapEdge {
+    Auto,
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl Default for SnapEdge {
+    fn default() -> Self {
+        Self::Auto
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -88,6 +110,19 @@ struct ImportStateResponse {
     canceled: bool,
     file_path: Option<String>,
     content: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupDirectoryResponse {
+    canceled: bool,
+    directory: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupWriteResponse {
+    file_path: String,
 }
 
 #[derive(Serialize)]
@@ -144,6 +179,11 @@ fn hide_main_window(window: Window) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn toggle_main_window_command(app: AppHandle) -> Result<(), String> {
+    toggle_main_window(&app)
+}
+
+#[tauri::command]
 fn set_snap_enabled(enabled: bool, state: State<RuntimeState>) {
     if let Ok(mut runtime) = state.inner.lock() {
         runtime.snap_enabled = enabled;
@@ -152,6 +192,38 @@ fn set_snap_enabled(enabled: bool, state: State<RuntimeState>) {
             runtime.snapped_y = None;
         }
     }
+}
+
+#[tauri::command]
+fn configure_window_behavior(
+    app: AppHandle,
+    state: State<RuntimeState>,
+    auto_hide_enabled: bool,
+    snap_edge: String,
+    snap_distance: f64,
+    reveal_delay_ms: u64,
+) -> Result<(), String> {
+    let edge = parse_snap_edge(&snap_edge);
+    let distance = snap_distance.clamp(4.0, 64.0);
+    let delay = reveal_delay_ms.min(1500);
+    let revision = {
+        let mut runtime = state
+            .inner
+            .lock()
+            .map_err(|_| "failed to lock runtime state".to_string())?;
+        runtime.auto_hide_enabled = auto_hide_enabled;
+        runtime.snap_edge = edge;
+        runtime.snap_distance = distance;
+        runtime.reveal_delay_ms = delay;
+        runtime.edge_watcher_revision = runtime.edge_watcher_revision.wrapping_add(1);
+        runtime.edge_watcher_revision
+    };
+
+    if auto_hide_enabled {
+        start_edge_reveal_watcher(app, revision);
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -165,19 +237,32 @@ fn set_window_size(
     let work_area = get_work_area(&window)?;
     let preferred_width = width.unwrap_or(current_bounds.width);
     let next_width = preferred_width.clamp(MIN_WIDTH, work_area.width);
-    let (snap_enabled, snapped_x) = {
+    let (snap_enabled, snapped_x, snap_edge, snap_distance) = {
         let runtime = state
             .inner
             .lock()
             .map_err(|_| "failed to lock runtime state".to_string())?;
-        (runtime.snap_enabled, runtime.snapped_x)
+        (
+            runtime.snap_enabled,
+            runtime.snapped_x,
+            runtime.snap_edge,
+            runtime.snap_distance,
+        )
     };
     let current_max_x = work_area.x + work_area.width - current_bounds.width;
-    let inferred_snap_x = if snap_enabled {
-        infer_axis_snap(current_bounds.x, work_area.x, current_max_x, snapped_x)
-    } else {
-        None
-    };
+    let inferred_snap_x =
+        if snap_enabled && matches!(snap_edge, SnapEdge::Auto | SnapEdge::Left | SnapEdge::Right) {
+            infer_axis_snap(
+                current_bounds.x,
+                work_area.x,
+                current_max_x,
+                snapped_x,
+                snap_distance + SNAP_RELEASE_PADDING,
+                snap_edge,
+            )
+        } else {
+            None
+        };
     let preferred_x = match inferred_snap_x {
         Some(SnapTarget::Min) => work_area.x,
         Some(SnapTarget::Max) => work_area.x + work_area.width - next_width,
@@ -292,6 +377,44 @@ async fn import_state() -> Result<ImportStateResponse, String> {
         canceled: false,
         file_path: Some(file_path.display().to_string()),
         content: Some(content),
+    })
+}
+
+#[tauri::command]
+async fn choose_backup_directory() -> Result<BackupDirectoryResponse, String> {
+    let Some(directory) = rfd::FileDialog::new().pick_folder() else {
+        return Ok(BackupDirectoryResponse {
+            canceled: true,
+            directory: None,
+        });
+    };
+
+    Ok(BackupDirectoryResponse {
+        canceled: false,
+        directory: Some(directory.display().to_string()),
+    })
+}
+
+#[tauri::command]
+async fn write_backup_file(
+    content: String,
+    directory: String,
+    retention: usize,
+) -> Result<BackupWriteResponse, String> {
+    let directory = PathBuf::from(directory);
+    if !directory.exists() {
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    }
+    if !directory.is_dir() {
+        return Err("backup path is not a directory".to_string());
+    }
+
+    let file_path = directory.join(build_backup_file_name());
+    fs::write(&file_path, content).map_err(|error| error.to_string())?;
+    prune_backup_files(&directory, retention.max(1))?;
+
+    Ok(BackupWriteResponse {
+        file_path: file_path.display().to_string(),
     })
 }
 
@@ -426,6 +549,9 @@ pub fn run() {
         .manage(RuntimeState {
             inner: Mutex::new(WindowRuntimeState {
                 snap_enabled: true,
+                snap_edge: SnapEdge::Auto,
+                snap_distance: DEFAULT_SNAP_DISTANCE,
+                reveal_delay_ms: DEFAULT_REVEAL_DELAY_MS,
                 ..WindowRuntimeState::default()
             }),
         })
@@ -433,6 +559,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None::<Vec<&str>>,
         ))
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -475,10 +602,14 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             hide_main_window,
+            toggle_main_window_command,
             open_target,
             export_state,
             import_state,
+            choose_backup_directory,
+            write_backup_file,
             set_snap_enabled,
+            configure_window_behavior,
             set_window_size,
             resolve_dropped_paths,
             scan_shortcut_locations,
@@ -546,6 +677,14 @@ fn configure_main_webview_window(
         work_area,
     );
 
+    apply_webview_bounds(window, &state, clamped)
+}
+
+fn apply_webview_bounds(
+    window: &WebviewWindow,
+    state: &State<RuntimeState>,
+    bounds: WindowBounds,
+) -> Result<(), String> {
     {
         let mut runtime = state
             .inner
@@ -554,8 +693,8 @@ fn configure_main_webview_window(
         runtime.adjusting_position = true;
     }
 
-    let size = Size::Logical(LogicalSize::new(clamped.width, clamped.height));
-    let position = Position::Logical(LogicalPosition::new(clamped.x as f64, clamped.y as f64));
+    let size = Size::Logical(LogicalSize::new(bounds.width, bounds.height));
+    let position = Position::Logical(LogicalPosition::new(bounds.x, bounds.y));
     let size_result = window.set_size(size).map_err(|error| error.to_string());
     let position_result = window
         .set_position(position)
@@ -596,6 +735,119 @@ fn toggle_main_window(app: &AppHandle) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn start_edge_reveal_watcher(app: AppHandle, revision: u64) {
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_millis(EDGE_WATCH_INTERVAL_MS));
+
+        let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+            return;
+        };
+
+        let (enabled, current_revision, configured_edge, distance, delay_ms) = {
+            let state = window.state::<RuntimeState>();
+            let Ok(runtime) = state.inner.lock() else {
+                return;
+            };
+            (
+                runtime.auto_hide_enabled,
+                runtime.edge_watcher_revision,
+                runtime.snap_edge,
+                runtime.snap_distance,
+                runtime.reveal_delay_ms,
+            )
+        };
+
+        if !enabled || current_revision != revision {
+            return;
+        }
+
+        if window.is_visible().unwrap_or(true) {
+            continue;
+        }
+
+        let Some((edge, work_area)) = resolve_cursor_reveal_target(&app, configured_edge, distance)
+        else {
+            continue;
+        };
+
+        if delay_ms > 0 {
+            thread::sleep(Duration::from_millis(delay_ms));
+        }
+
+        let still_hidden = window.is_visible().map(|visible| !visible).unwrap_or(false);
+        let still_near_edge =
+            resolve_cursor_reveal_target(&app, configured_edge, distance).is_some();
+        if still_hidden && still_near_edge {
+            let _ = show_main_window_at_edge(&app, edge, work_area);
+        }
+    });
+}
+
+fn resolve_cursor_reveal_target(
+    app: &AppHandle,
+    configured_edge: SnapEdge,
+    distance: f64,
+) -> Option<(SnapEdge, WorkArea)> {
+    let cursor = app.cursor_position().ok()?;
+    let monitor = app
+        .monitor_from_point(cursor.x, cursor.y)
+        .ok()
+        .flatten()
+        .or_else(|| app.primary_monitor().ok().flatten())?;
+    let area = work_area_from_monitor(&monitor);
+    let scale_factor = monitor.scale_factor();
+    let cursor_x = cursor.x / scale_factor;
+    let cursor_y = cursor.y / scale_factor;
+    let edge = resolve_reveal_edge(cursor_x, cursor_y, area, configured_edge, distance)?;
+    Some((edge, area))
+}
+
+fn resolve_reveal_edge(
+    cursor_x: f64,
+    cursor_y: f64,
+    area: WorkArea,
+    configured_edge: SnapEdge,
+    distance: f64,
+) -> Option<SnapEdge> {
+    let near_left = (cursor_x - area.x).abs() <= distance;
+    let near_right = (cursor_x - (area.x + area.width)).abs() <= distance;
+    let near_top = (cursor_y - area.y).abs() <= distance;
+    let near_bottom = (cursor_y - (area.y + area.height)).abs() <= distance;
+
+    match configured_edge {
+        SnapEdge::Left if near_left => Some(SnapEdge::Left),
+        SnapEdge::Right if near_right => Some(SnapEdge::Right),
+        SnapEdge::Top if near_top => Some(SnapEdge::Top),
+        SnapEdge::Bottom if near_bottom => Some(SnapEdge::Bottom),
+        SnapEdge::Auto if near_left => Some(SnapEdge::Left),
+        SnapEdge::Auto if near_right => Some(SnapEdge::Right),
+        SnapEdge::Auto if near_top => Some(SnapEdge::Top),
+        SnapEdge::Auto if near_bottom => Some(SnapEdge::Bottom),
+        _ => None,
+    }
+}
+
+fn show_main_window_at_edge(
+    app: &AppHandle,
+    edge: SnapEdge,
+    work_area: WorkArea,
+) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+        return Ok(());
+    };
+    let state = window.state::<RuntimeState>();
+    let current_bounds = get_webview_window_bounds(&window).unwrap_or(WindowBounds {
+        x: work_area.x,
+        y: work_area.y,
+        width: MIN_WIDTH,
+        height: MIN_HEIGHT,
+    });
+    let bounds =
+        get_edge_docked_bounds(work_area, edge, current_bounds.width, current_bounds.height);
+    apply_webview_bounds(&window, &state, bounds)?;
+    show_main_window(app)
 }
 
 fn quit_application(app: &AppHandle) {
@@ -656,8 +908,33 @@ fn maybe_adjust_position(window: &Window, state: &State<RuntimeState>) -> Result
     let bottom = work_area.y + work_area.height - current_bounds.height;
 
     if runtime.snap_enabled {
-        let snap_x = resolve_axis_snap(current_bounds.x, left, right, runtime.snapped_x);
-        let snap_y = resolve_axis_snap(current_bounds.y, top, bottom, runtime.snapped_y);
+        let snap_edge = runtime.snap_edge;
+        let snap_distance = runtime.snap_distance;
+        let release_distance = snap_distance + SNAP_RELEASE_PADDING;
+        let snap_x = match snap_edge {
+            SnapEdge::Auto | SnapEdge::Left | SnapEdge::Right => resolve_axis_snap(
+                current_bounds.x,
+                left,
+                right,
+                runtime.snapped_x,
+                snap_distance,
+                release_distance,
+                snap_edge,
+            ),
+            _ => (current_bounds.x, None),
+        };
+        let snap_y = match snap_edge {
+            SnapEdge::Auto | SnapEdge::Top | SnapEdge::Bottom => resolve_axis_snap(
+                current_bounds.y,
+                top,
+                bottom,
+                runtime.snapped_y,
+                snap_distance,
+                release_distance,
+                snap_edge,
+            ),
+            _ => (current_bounds.y, None),
+        };
         target_x = snap_x.0;
         target_y = snap_y.0;
         runtime.snapped_x = snap_x.1;
@@ -725,8 +1002,26 @@ fn schedule_snap_after_move(window: &Window) {
 fn clamp_window_bounds(window: &Window, state: &State<RuntimeState>) -> Result<(), String> {
     let current_bounds = get_window_bounds(window)?;
     let work_area = get_work_area(window)?;
+    let (snap_enabled, snap_edge) = state
+        .inner
+        .lock()
+        .map(|runtime| (runtime.snap_enabled, runtime.snap_edge))
+        .unwrap_or((false, SnapEdge::Auto));
+    if !snap_enabled {
+        return apply_bounds(window, state, clamp_bounds(current_bounds, work_area));
+    }
+
     let clamped = clamp_bounds(
-        get_docked_bounds(work_area, Some(current_bounds.x), current_bounds.width),
+        if snap_edge == SnapEdge::Auto {
+            get_docked_bounds(work_area, Some(current_bounds.x), current_bounds.width)
+        } else {
+            get_edge_docked_bounds(
+                work_area,
+                snap_edge,
+                current_bounds.width,
+                current_bounds.height,
+            )
+        },
         work_area,
     );
     apply_bounds(window, state, clamped)
@@ -800,6 +1095,20 @@ fn get_webview_work_area(window: &WebviewWindow) -> Result<WorkArea, String> {
     })
 }
 
+fn work_area_from_monitor(monitor: &Monitor) -> WorkArea {
+    let area = monitor.work_area();
+    let scale_factor = monitor.scale_factor();
+    let position = area.position.to_logical::<f64>(scale_factor);
+    let size = area.size.to_logical::<f64>(scale_factor);
+
+    WorkArea {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+    }
+}
+
 fn get_docked_bounds(
     area: WorkArea,
     preferred_x: Option<f64>,
@@ -822,6 +1131,47 @@ fn get_docked_bounds(
     }
 }
 
+fn get_edge_docked_bounds(
+    area: WorkArea,
+    edge: SnapEdge,
+    preferred_width: f64,
+    preferred_height: f64,
+) -> WindowBounds {
+    let width = preferred_width.clamp(MIN_WIDTH, area.width);
+    let height = preferred_height.clamp(MIN_HEIGHT.min(area.height), area.height);
+    let right_x = area.x + area.width - width;
+    let bottom_y = area.y + area.height - height;
+    let fallback_x = (area.x + area.width - width - WINDOW_MARGIN_RIGHT).clamp(area.x, right_x);
+    let y = area.y + WINDOW_MARGIN_TOP.min((area.height - height).max(0.0));
+
+    match edge {
+        SnapEdge::Left => WindowBounds {
+            x: area.x,
+            y,
+            width,
+            height,
+        },
+        SnapEdge::Right | SnapEdge::Auto => WindowBounds {
+            x: right_x,
+            y,
+            width,
+            height,
+        },
+        SnapEdge::Top => WindowBounds {
+            x: fallback_x,
+            y: area.y,
+            width,
+            height,
+        },
+        SnapEdge::Bottom => WindowBounds {
+            x: fallback_x,
+            y: bottom_y,
+            width,
+            height,
+        },
+    }
+}
+
 fn clamp_bounds(bounds: WindowBounds, area: WorkArea) -> WindowBounds {
     let width = bounds.width.clamp(MIN_WIDTH, area.width);
     let height = bounds.height.clamp(MIN_HEIGHT, area.height);
@@ -841,20 +1191,28 @@ fn resolve_axis_snap(
     min: f64,
     max: f64,
     snapped_state: Option<SnapTarget>,
+    snap_distance: f64,
+    release_distance: f64,
+    snap_edge: SnapEdge,
 ) -> (f64, Option<SnapTarget>) {
-    let near_min = (current - min).abs() <= SNAP_DISTANCE;
-    let near_max = (current - max).abs() <= SNAP_DISTANCE;
+    let allow_min = matches!(snap_edge, SnapEdge::Auto | SnapEdge::Left | SnapEdge::Top);
+    let allow_max = matches!(
+        snap_edge,
+        SnapEdge::Auto | SnapEdge::Right | SnapEdge::Bottom
+    );
+    let near_min = allow_min && (current - min).abs() <= snap_distance;
+    let near_max = allow_max && (current - max).abs() <= snap_distance;
 
     match snapped_state {
         Some(SnapTarget::Min) => {
-            if (current - min).abs() <= SNAP_RELEASE_DISTANCE {
+            if allow_min && (current - min).abs() <= release_distance {
                 (min, Some(SnapTarget::Min))
             } else {
                 (current, None)
             }
         }
         Some(SnapTarget::Max) => {
-            if (current - max).abs() <= SNAP_RELEASE_DISTANCE {
+            if allow_max && (current - max).abs() <= release_distance {
                 (max, Some(SnapTarget::Max))
             } else {
                 (current, None)
@@ -871,26 +1229,58 @@ fn infer_axis_snap(
     min: f64,
     max: f64,
     snapped_state: Option<SnapTarget>,
+    release_distance: f64,
+    snap_edge: SnapEdge,
 ) -> Option<SnapTarget> {
+    let allow_min = matches!(snap_edge, SnapEdge::Auto | SnapEdge::Left | SnapEdge::Top);
+    let allow_max = matches!(
+        snap_edge,
+        SnapEdge::Auto | SnapEdge::Right | SnapEdge::Bottom
+    );
     match snapped_state {
         Some(target) => Some(target),
-        None if (current - min).abs() <= SNAP_RELEASE_DISTANCE => Some(SnapTarget::Min),
-        None if (current - max).abs() <= SNAP_RELEASE_DISTANCE => Some(SnapTarget::Max),
+        None if allow_min && (current - min).abs() <= release_distance => Some(SnapTarget::Min),
+        None if allow_max && (current - max).abs() <= release_distance => Some(SnapTarget::Max),
         None => None,
     }
 }
 
-fn build_backup_file_name() -> String {
-    format!("mini-desk-tool-backup-{}.json", current_unix_timestamp())
+fn parse_snap_edge(value: &str) -> SnapEdge {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "left" => SnapEdge::Left,
+        "right" => SnapEdge::Right,
+        "top" => SnapEdge::Top,
+        "bottom" => SnapEdge::Bottom,
+        _ => SnapEdge::Auto,
+    }
 }
 
-fn current_unix_timestamp() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
+fn build_backup_file_name() -> String {
+    format!("mini-desk-tool-backup-{}.json", current_unix_millis())
+}
 
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or_default()
+fn prune_backup_files(directory: &Path, retention: usize) -> Result<(), String> {
+    let mut backups = fs::read_dir(directory)
+        .map_err(|error| error.to_string())?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("mini-desk-tool-backup-")
+        })
+        .filter_map(|entry| {
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((entry.path(), modified))
+        })
+        .collect::<Vec<_>>();
+
+    backups.sort_by(|left, right| right.1.cmp(&left.1));
+    for (path, _) in backups.into_iter().skip(retention) {
+        let _ = fs::remove_file(path);
+    }
+
+    Ok(())
 }
 
 fn current_unix_millis() -> u128 {
@@ -1650,7 +2040,7 @@ mod tests {
     fn falls_back_to_shortcut_file_when_lnk_target_cannot_be_resolved() {
         let path = std::env::temp_dir().join(format!(
             "mini-desk-tool-empty-{}-{}.lnk",
-            current_unix_timestamp(),
+            current_unix_millis(),
             std::process::id()
         ));
         fs::write(&path, "").expect("write fake shortcut");
@@ -1695,5 +2085,70 @@ mod tests {
 
         let data_url = svg_to_data_url(&svg);
         assert!(data_url.starts_with("data:image/svg+xml;base64,"));
+    }
+
+    #[test]
+    fn auto_snap_preserves_legacy_left_and_right_edges() {
+        let (left, left_state) = resolve_axis_snap(
+            8.0,
+            0.0,
+            500.0,
+            None,
+            DEFAULT_SNAP_DISTANCE,
+            DEFAULT_SNAP_DISTANCE + SNAP_RELEASE_PADDING,
+            SnapEdge::Auto,
+        );
+        let (right, right_state) = resolve_axis_snap(
+            492.0,
+            0.0,
+            500.0,
+            None,
+            DEFAULT_SNAP_DISTANCE,
+            DEFAULT_SNAP_DISTANCE + SNAP_RELEASE_PADDING,
+            SnapEdge::Auto,
+        );
+
+        assert_eq!(left, 0.0);
+        assert_eq!(left_state, Some(SnapTarget::Min));
+        assert_eq!(right, 500.0);
+        assert_eq!(right_state, Some(SnapTarget::Max));
+    }
+
+    #[test]
+    fn configured_snap_edge_limits_snap_axis() {
+        let (_, left_state) =
+            resolve_axis_snap(492.0, 0.0, 500.0, None, 14.0, 26.0, SnapEdge::Left);
+        let (_, right_state) =
+            resolve_axis_snap(8.0, 0.0, 500.0, None, 14.0, 26.0, SnapEdge::Right);
+
+        assert_eq!(left_state, None);
+        assert_eq!(right_state, None);
+    }
+
+    #[test]
+    fn edge_docked_bounds_places_requested_edge() {
+        let area = WorkArea {
+            x: 10.0,
+            y: 20.0,
+            width: 1000.0,
+            height: 700.0,
+        };
+
+        assert_eq!(
+            get_edge_docked_bounds(area, SnapEdge::Left, 300.0, 500.0).x,
+            10.0
+        );
+        assert_eq!(
+            get_edge_docked_bounds(area, SnapEdge::Right, 300.0, 500.0).x,
+            710.0
+        );
+        assert_eq!(
+            get_edge_docked_bounds(area, SnapEdge::Top, 300.0, 500.0).y,
+            20.0
+        );
+        assert_eq!(
+            get_edge_docked_bounds(area, SnapEdge::Bottom, 300.0, 500.0).y,
+            220.0
+        );
     }
 }

@@ -11,7 +11,8 @@ import {
   saveState,
   SIZE_META,
   WINDOW_WIDTH_MAX,
-  WINDOW_WIDTH_MIN
+  WINDOW_WIDTH_MIN,
+  SEARCH_ENGINES
 } from "./model.js";
 import { registerDialogFeature } from "./dialogs.js";
 import { registerDragDropFeature } from "./drag-drop.js";
@@ -41,6 +42,7 @@ export function createDesktopPanelApp({ desktopPanel = window.desktopPanel } = {
       addDialogSource: "tile",
       dropIndicator: null,
       dragToastTimer: null,
+      issues: [],
       searchQuery: "",
       recentPage: 0,
       selectedItemIds: new Set(),
@@ -86,6 +88,12 @@ export function createDesktopPanelApp({ desktopPanel = window.desktopPanel } = {
         return;
       }
       window.open(url, "_blank", "noopener,noreferrer");
+    },
+    searchWithEngine(query) {
+      const trimmed = String(query || "").trim();
+      if (!trimmed) return;
+      const engine = SEARCH_ENGINES[app.store.state.layout.searchEngine] || SEARCH_ENGINES.bing;
+      app.openUrl(`${engine.url}${encodeURIComponent(trimmed)}`);
     }
   };
 
@@ -102,6 +110,7 @@ export function createDesktopPanelApp({ desktopPanel = window.desktopPanel } = {
         clampNumber(app.store.state.layout.windowWidth, WINDOW_WIDTH_MIN, WINDOW_WIDTH_MAX, 360)
       );
       app.desktopPanel?.setSnapEnabled?.(app.store.state.app.snapToEdge);
+      void app.syncWindowBehavior?.();
       app.render();
       app.bindEvents();
       app.bindDragBand();
@@ -119,6 +128,7 @@ function createRefs() {
     windowDragBand: document.querySelector("#windowDragBand"),
     workspace: document.querySelector("#workspace"),
     searchInput: document.querySelector("#searchInput"),
+    searchEngineSelect: document.querySelector("#searchEngineSelect"),
     clearSearchButton: document.querySelector("#clearSearchButton"),
     batchToolbar: document.querySelector("#batchToolbar"),
     batchCount: document.querySelector("#batchCount"),
@@ -144,6 +154,17 @@ function createRefs() {
     addLinkSearchStatus: document.querySelector("#addLinkSearchStatus"),
     cancelAddDialog: document.querySelector("#cancelAddDialog"),
     settingsDialog: document.querySelector("#settingsDialog"),
+    profileSelect: document.querySelector("#profileSelect"),
+    profileNameInput: document.querySelector("#profileNameInput"),
+    createProfileButton: document.querySelector("#createProfileButton"),
+    renameProfileButton: document.querySelector("#renameProfileButton"),
+    profileStatus: document.querySelector("#profileStatus"),
+    layoutPresetSelect: document.querySelector("#layoutPresetSelect"),
+    themeSelect: document.querySelector("#themeSelect"),
+    panelOpacityInput: document.querySelector("#panelOpacityInput"),
+    appearanceHint: document.querySelector("#appearanceHint"),
+    settingsSearchEngineSelect: document.querySelector("#settingsSearchEngineSelect"),
+    searchEngineHint: document.querySelector("#searchEngineHint"),
     iconSizeInput: document.querySelector("#iconSizeInput"),
     windowWidthInput: document.querySelector("#windowWidthInput"),
     showAddTileInput: document.querySelector("#showAddTileInput"),
@@ -156,13 +177,32 @@ function createRefs() {
     trackCountHint: document.querySelector("#trackCountHint"),
     snapEdgeInput: document.querySelector("#snapEdgeInput"),
     launchAtLoginInput: document.querySelector("#launchAtLoginInput"),
+    autoHideOnBlurInput: document.querySelector("#autoHideOnBlurInput"),
+    snapEdgeSelect: document.querySelector("#snapEdgeSelect"),
+    snapDistanceInput: document.querySelector("#snapDistanceInput"),
+    snapDistanceHint: document.querySelector("#snapDistanceHint"),
+    revealDelayInput: document.querySelector("#revealDelayInput"),
+    revealDelayHint: document.querySelector("#revealDelayHint"),
+    globalShortcutEnabledInput: document.querySelector("#globalShortcutEnabledInput"),
+    globalShortcutInput: document.querySelector("#globalShortcutInput"),
+    globalShortcutStatus: document.querySelector("#globalShortcutStatus"),
     dragToast: document.querySelector("#dragToast"),
+    issueCenter: document.querySelector("#issueCenter"),
+    issueList: document.querySelector("#issueList"),
+    dismissIssueCenter: document.querySelector("#dismissIssueCenter"),
     importDesktopButton: document.querySelector("#importDesktopButton"),
     importStartMenuButton: document.querySelector("#importStartMenuButton"),
     exportDataButton: document.querySelector("#exportDataButton"),
     importDataButton: document.querySelector("#importDataButton"),
     autoGroupButton: document.querySelector("#autoGroupButton"),
     closeWindowButton: document.querySelector("#closeWindow"),
+    autoBackupEnabledInput: document.querySelector("#autoBackupEnabledInput"),
+    backupRetentionInput: document.querySelector("#backupRetentionInput"),
+    backupStatus: document.querySelector("#backupStatus"),
+    chooseBackupDirectoryButton: document.querySelector("#chooseBackupDirectoryButton"),
+    backupNowButton: document.querySelector("#backupNowButton"),
+    restorePointButton: document.querySelector("#restorePointButton"),
+    clearIssuesButton: document.querySelector("#clearIssuesButton"),
     cancelSettingsDialog: document.querySelector("#cancelSettingsDialog"),
     editDialog: document.querySelector("#editDialog"),
     editForm: document.querySelector("#editForm"),

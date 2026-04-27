@@ -3,6 +3,8 @@ import {
   DEFAULT_GAP,
   ensureValidGroups,
   escapeHtml,
+  THEME_OPTIONS,
+  SEARCH_ENGINES,
   makeFallbackIcon,
   safeHost,
   SIZE_META,
@@ -22,6 +24,8 @@ export function registerRenderFeature(app) {
   app.setItemIcon = setItemIcon;
   app.createAddTile = createAddTile;
   app.showDragToast = showDragToast;
+  app.reportIssue = reportIssue;
+  app.clearIssues = clearIssues;
   app.setSearchQuery = setSearchQuery;
   app.toggleGroupCollapsed = toggleGroupCollapsed;
   app.toggleItemSelection = toggleItemSelection;
@@ -42,8 +46,23 @@ export function registerRenderFeature(app) {
     document.documentElement.style.setProperty("--gap", `${DEFAULT_GAP}px`);
     document.documentElement.style.setProperty("--tile-base-size", `${tileBase}px`);
     document.documentElement.style.setProperty("--track-count", String(trackCount));
+    const theme = THEME_OPTIONS[app.store.state.layout.theme] || THEME_OPTIONS.aurora;
+    const opacity = clampNumber(app.store.state.layout.panelOpacity, 58, 96, 78) / 100;
+    const normalizedOpacity = (opacity - 0.58) / (0.96 - 0.58);
+    document.documentElement.style.setProperty("--panel-alpha", String(opacity));
+    document.documentElement.style.setProperty("--panel-alpha-soft", String(Math.max(0.2, opacity * 0.62)));
+    document.documentElement.style.setProperty("--panel-alpha-strong", String(Math.min(0.98, opacity + 0.08)));
+    document.documentElement.style.setProperty("--panel-bg-glow", String(0.04 + normalizedOpacity * 0.18));
+    document.documentElement.style.setProperty("--panel-bg-wash", String(0.02 + normalizedOpacity * 0.16));
+    document.documentElement.style.setProperty("--tile-alpha", String(0.08 + normalizedOpacity * 0.16));
+    document.documentElement.style.setProperty("--theme-accent", theme.accent);
+    document.documentElement.style.setProperty("--theme-accent-2", theme.accent2);
+    document.documentElement.style.setProperty("--theme-accent-rgb", theme.accentRgb);
+    document.documentElement.style.setProperty("--theme-accent-2-rgb", theme.accent2Rgb);
+    document.documentElement.style.setProperty("--theme-surface-rgb", theme.surface);
     app.refs.appShell.dataset.flow = app.store.state.layout.flowDirection === "rtl" ? "rtl" : "ltr";
     app.refs.appShell.dataset.showLabels = app.store.state.layout.showItemLabel === false ? "false" : "true";
+    app.refs.appShell.dataset.theme = app.store.state.layout.theme || "aurora";
     updateTrackCountHint();
   }
 
@@ -181,13 +200,14 @@ export function registerRenderFeature(app) {
     render();
   }
 
-  function createItemNode(item, groupId, index, { enableDrag = true, recentOnly = false } = {}) {
+  function createItemNode(item, groupId, index, { enableDrag = true, recentOnly = false, displaySize = null } = {}) {
     const node = app.refs.itemTemplate.content.firstElementChild.cloneNode(true);
+    const sizeKey = SIZE_META[displaySize] ? displaySize : item.size;
     node.draggable = false;
     node.dataset.itemId = item.id;
     node.dataset.groupId = groupId;
     node.dataset.index = String(index);
-    node.dataset.size = item.size;
+    node.dataset.size = SIZE_META[sizeKey] ? sizeKey : "1x1";
     node.dataset.recentOnly = recentOnly ? "true" : "false";
     node.classList.toggle("is-selected", app.runtime.selectedItemIds.has(item.id));
 
@@ -200,7 +220,7 @@ export function registerRenderFeature(app) {
     selectButton.setAttribute("aria-label", app.runtime.selectedItemIds.has(item.id) ? "取消选择" : "选择项目");
     selectButton.textContent = app.runtime.selectedItemIds.has(item.id) ? "✓" : "";
     node.insertBefore(selectButton, node.firstChild);
-    const meta = SIZE_META[item.size] || SIZE_META["1x1"];
+    const meta = SIZE_META[sizeKey] || SIZE_META["1x1"];
     const iconSize = Math.round(app.store.state.layout.iconSize);
     const tileBase = Math.max(84, iconSize + 28);
     const frameWidth =
@@ -323,6 +343,39 @@ export function registerRenderFeature(app) {
       app.refs.dragToast.classList.remove("is-visible");
       app.refs.dragToast.hidden = true;
     }, 1800);
+  }
+
+  function reportIssue(message, detail = "") {
+    const issue = {
+      id: crypto.randomUUID(),
+      message: String(message || "发生未知问题"),
+      detail: String(detail || ""),
+      createdAt: new Date().toLocaleString()
+    };
+    app.runtime.issues.unshift(issue);
+    app.runtime.issues = app.runtime.issues.slice(0, 6);
+    syncIssueCenter();
+  }
+
+  function clearIssues() {
+    app.runtime.issues = [];
+    syncIssueCenter();
+  }
+
+  function syncIssueCenter() {
+    if (!app.refs.issueCenter || !app.refs.issueList) return;
+    app.refs.issueCenter.hidden = app.runtime.issues.length === 0;
+    app.refs.issueList.innerHTML = "";
+    app.runtime.issues.forEach((issue) => {
+      const item = document.createElement("article");
+      item.className = "issue-item";
+      const title = document.createElement("strong");
+      title.textContent = issue.message;
+      const meta = document.createElement("span");
+      meta.textContent = issue.detail ? `${issue.createdAt} · ${issue.detail}` : issue.createdAt;
+      item.append(title, meta);
+      app.refs.issueList.appendChild(item);
+    });
   }
 
   function setSearchQuery(value) {
@@ -458,6 +511,11 @@ export function registerRenderFeature(app) {
     if (app.refs.searchInput && app.refs.searchInput.value !== app.runtime.searchQuery) {
       app.refs.searchInput.value = app.runtime.searchQuery;
     }
+    if (app.refs.searchEngineSelect) {
+      const engine = SEARCH_ENGINES[app.store.state.layout.searchEngine] ? app.store.state.layout.searchEngine : "bing";
+      app.refs.searchEngineSelect.value = engine;
+      app.refs.searchEngineSelect.title = `回车使用 ${SEARCH_ENGINES[engine].label} 搜索`;
+    }
     if (app.refs.clearSearchButton) {
       app.refs.clearSearchButton.hidden = !app.runtime.searchQuery;
     }
@@ -547,7 +605,7 @@ export function registerRenderFeature(app) {
     grid.dataset.recent = "true";
     pageItems.forEach(({ group, item }) => {
       const index = group.items.findIndex((entry) => entry.id === item.id);
-      grid.appendChild(createItemNode(item, group.id, index, { enableDrag: false, recentOnly: true }));
+      grid.appendChild(createItemNode(item, group.id, index, { enableDrag: false, recentOnly: true, displaySize: "1x1" }));
     });
     section.appendChild(grid);
     return section;

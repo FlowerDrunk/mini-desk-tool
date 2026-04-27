@@ -1,11 +1,31 @@
 import {
   buildExportPayload,
+  BACKUP_RETENTION_MAX,
+  BACKUP_RETENTION_MIN,
   clampNumber,
+  applyProfileSnapshot,
+  createProfileSnapshot,
+  DEFAULT_GLOBAL_SHORTCUT,
   DEFAULT_GROUP_ID,
   extractImportedState,
   findItem,
+  getNextProfileName,
   inferGroupName,
+  LAYOUT_PRESETS,
   NEW_AUTO_GROUP,
+  PANEL_OPACITY_MAX,
+  PANEL_OPACITY_MIN,
+  REVEAL_DELAY_MAX,
+  REVEAL_DELAY_MIN,
+  sanitizeLayoutPreset,
+  sanitizeSearchEngine,
+  sanitizeSnapEdge,
+  sanitizeShortcut,
+  sanitizeTheme,
+  SNAP_DISTANCE_MAX,
+  SNAP_DISTANCE_MIN,
+  syncActiveProfileState,
+  THEME_OPTIONS,
   TRACK_COUNT_MAX,
   TRACK_COUNT_MIN,
   uniqueGroupName,
@@ -14,9 +34,18 @@ import {
 } from "./model.js";
 
 export function registerDialogFeature(app) {
+  const saveStateNow = app.saveState;
+  let backupTimer = null;
+
+  app.saveState = () => {
+    saveStateNow();
+    scheduleAutomaticBackup();
+  };
   app.bindEvents = bindEvents;
   app.exportDataToFile = exportDataToFile;
   app.importDataFromFile = importDataFromFile;
+  app.createRestorePoint = createRestorePoint;
+  app.writeAutomaticBackup = writeAutomaticBackup;
   app.refreshGroupOptions = refreshGroupOptions;
   app.ensureGroupBySelection = ensureGroupBySelection;
   app.openAddDialog = openAddDialog;
@@ -24,6 +53,7 @@ export function registerDialogFeature(app) {
   app.syncEditDialogFields = syncEditDialogFields;
   app.syncSettingsDialogFields = syncSettingsDialogFields;
   app.openSettings = openSettings;
+  app.syncWindowBehavior = syncWindowBehavior;
   app.hideMenus = hideMenus;
   app.openMenu = openMenu;
   app.shouldAutoSearchOfficialLink = shouldAutoSearchOfficialLink;
@@ -37,6 +67,7 @@ export function registerDialogFeature(app) {
       if (result?.filePath) app.showDragToast(`数据已导出到 ${result.filePath}`);
     } catch {
       app.showDragToast("导出失败，请稍后重试");
+      app.reportIssue?.("导出失败", "请稍后重试或检查目标目录权限");
     }
   }
 
@@ -45,16 +76,20 @@ export function registerDialogFeature(app) {
       const result = await app.desktopPanel?.importStateFile?.();
       if (result?.canceled || !result?.content) return;
 
+      createRestorePoint("导入数据前");
+      await writeAutomaticBackup("导入数据前恢复点", { silent: true });
       const nextState = app.hydrateState(extractImportedState(JSON.parse(result.content)));
-      app.store.state = nextState;
+      app.store.state = mergeLocalRecoveryState(nextState, app.store.state);
       app.saveState();
       app.applyLayout();
       app.desktopPanel?.setSnapEnabled?.(app.store.state.app.snapToEdge);
+      void app.syncWindowBehavior?.();
       app.render();
       if (app.refs.settingsDialog.open) await syncSettingsDialogFields();
       app.showDragToast(`数据已从 ${result.filePath} 导入`);
     } catch {
       app.showDragToast("导入失败，请确认选择的是有效备份文件");
+      app.reportIssue?.("导入失败", "当前数据未被覆盖，已保留导入前状态");
     }
   }
 
@@ -68,16 +103,54 @@ export function registerDialogFeature(app) {
     });
     app.refs.searchInput?.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
-      const firstTile = app.refs.groupsContainer.querySelector(".tile");
-      if (!(firstTile instanceof HTMLElement)) return;
       event.preventDefault();
-      const item = app.findItem(firstTile.dataset.groupId, firstTile.dataset.itemId);
-      if (item) app.openItem(item.id, item.url);
+      app.searchWithEngine(app.refs.searchInput.value);
+    });
+    app.refs.searchEngineSelect?.addEventListener("change", () => {
+      app.store.state.layout.searchEngine = sanitizeSearchEngine(app.refs.searchEngineSelect.value);
+      app.saveState();
+      syncSearchEngineFields();
     });
     app.refs.clearSearchButton?.addEventListener("click", () => {
       app.setSearchQuery("");
       app.refs.searchInput?.focus();
     });
+    app.refs.profileSelect?.addEventListener("change", () => {
+      switchProfile(app.refs.profileSelect.value);
+    });
+    app.refs.createProfileButton?.addEventListener("click", () => {
+      createProfileFromCurrent();
+    });
+    app.refs.renameProfileButton?.addEventListener("click", () => {
+      renameCurrentProfile();
+    });
+    app.refs.layoutPresetSelect?.addEventListener("change", () => {
+      applyLayoutPreset(app.refs.layoutPresetSelect.value);
+    });
+    app.refs.themeSelect?.addEventListener("change", () => {
+      app.store.state.layout.theme = sanitizeTheme(app.refs.themeSelect.value);
+      app.applyLayout();
+      app.saveState();
+      updateAppearanceHint();
+    });
+    app.refs.panelOpacityInput?.addEventListener("input", () => {
+      app.store.state.layout.panelOpacity = clampNumber(
+        Number(app.refs.panelOpacityInput.value),
+        PANEL_OPACITY_MIN,
+        PANEL_OPACITY_MAX,
+        78
+      );
+      app.applyLayout();
+      app.saveState();
+      updateAppearanceHint();
+    });
+    app.refs.settingsSearchEngineSelect?.addEventListener("change", () => {
+      app.store.state.layout.searchEngine = sanitizeSearchEngine(app.refs.settingsSearchEngineSelect.value);
+      app.saveState();
+      syncSearchEngineFields();
+    });
+    app.refs.dismissIssueCenter?.addEventListener("click", () => app.clearIssues?.());
+    app.refs.clearIssuesButton?.addEventListener("click", () => app.clearIssues?.());
     app.refs.batchSelectGroupButton?.addEventListener("click", () => {
       app.selectCurrentGroupItems();
     });
@@ -227,7 +300,12 @@ export function registerDialogFeature(app) {
       true
     );
 
-    window.addEventListener("blur", hideMenus);
+    window.addEventListener("blur", () => {
+      hideMenus();
+      if (app.store.state.app.autoHideOnBlur && !hasOpenDialog()) {
+        void app.desktopPanel?.closeWindow?.();
+      }
+    });
 
     app.refs.appContextMenu.addEventListener("click", (event) => {
       const action = event.target.closest("[data-action]")?.dataset.action;
@@ -266,9 +344,11 @@ export function registerDialogFeature(app) {
 
     app.refs.iconSizeInput.addEventListener("input", () => {
       app.store.state.layout.iconSize = clampNumber(Number(app.refs.iconSizeInput.value), 42, 76, 58);
+      app.store.state.layout.layoutPreset = "custom";
       app.applyLayout();
       app.saveState();
       app.render();
+      if (app.refs.layoutPresetSelect) app.refs.layoutPresetSelect.value = "custom";
     });
 
     app.refs.windowWidthInput.addEventListener("input", () => {
@@ -278,7 +358,9 @@ export function registerDialogFeature(app) {
         WINDOW_WIDTH_MAX,
         360
       );
+      app.store.state.layout.layoutPreset = "custom";
       app.saveState();
+      if (app.refs.layoutPresetSelect) app.refs.layoutPresetSelect.value = "custom";
     });
     app.refs.windowWidthInput.addEventListener("change", () => {
       void syncWindowWidth();
@@ -298,9 +380,11 @@ export function registerDialogFeature(app) {
 
     app.refs.showItemLabelInput?.addEventListener("change", () => {
       app.store.state.layout.showItemLabel = app.refs.showItemLabelInput.checked;
+      app.store.state.layout.layoutPreset = "custom";
       app.applyLayout();
       app.saveState();
       app.render();
+      if (app.refs.layoutPresetSelect) app.refs.layoutPresetSelect.value = "custom";
     });
 
     app.refs.showSearchInput?.addEventListener("change", () => {
@@ -330,10 +414,12 @@ export function registerDialogFeature(app) {
         TRACK_COUNT_MAX,
         3
       );
+      app.store.state.layout.layoutPreset = "custom";
       app.updateTrackCountHint();
       app.applyLayout();
       app.saveState();
       app.render();
+      if (app.refs.layoutPresetSelect) app.refs.layoutPresetSelect.value = "custom";
     });
 
     app.refs.snapEdgeInput.addEventListener("change", () => {
@@ -352,6 +438,85 @@ export function registerDialogFeature(app) {
       }
     });
 
+    app.refs.autoHideOnBlurInput?.addEventListener("change", () => {
+      app.store.state.app.autoHideOnBlur = app.refs.autoHideOnBlurInput.checked;
+      app.saveState();
+      void syncNativeWindowBehavior();
+    });
+
+    app.refs.snapEdgeSelect?.addEventListener("change", () => {
+      app.store.state.app.snapEdge = sanitizeSnapEdge(app.refs.snapEdgeSelect.value);
+      app.saveState();
+      void syncNativeWindowBehavior();
+    });
+
+    app.refs.snapDistanceInput?.addEventListener("input", () => {
+      app.store.state.app.snapDistance = clampNumber(
+        Number(app.refs.snapDistanceInput.value),
+        SNAP_DISTANCE_MIN,
+        SNAP_DISTANCE_MAX,
+        14
+      );
+      updateWindowBehaviorHints();
+      app.saveState();
+      void syncNativeWindowBehavior();
+    });
+
+    app.refs.revealDelayInput?.addEventListener("input", () => {
+      app.store.state.app.revealDelay = clampNumber(
+        Number(app.refs.revealDelayInput.value),
+        REVEAL_DELAY_MIN,
+        REVEAL_DELAY_MAX,
+        250
+      );
+      updateWindowBehaviorHints();
+      app.saveState();
+      void syncNativeWindowBehavior();
+    });
+
+    app.refs.globalShortcutEnabledInput?.addEventListener("change", () => {
+      app.store.state.app.globalShortcutEnabled = app.refs.globalShortcutEnabledInput.checked;
+      app.saveState();
+      void syncWindowBehavior();
+    });
+
+    app.refs.globalShortcutInput?.addEventListener("change", () => {
+      app.store.state.app.globalShortcut = sanitizeShortcut(app.refs.globalShortcutInput.value || DEFAULT_GLOBAL_SHORTCUT);
+      app.refs.globalShortcutInput.value = app.store.state.app.globalShortcut;
+      app.saveState();
+      void syncWindowBehavior();
+    });
+
+    app.refs.autoBackupEnabledInput?.addEventListener("change", () => {
+      app.store.state.app.autoBackupEnabled = app.refs.autoBackupEnabledInput.checked;
+      app.saveState();
+      updateBackupStatus();
+    });
+
+    app.refs.backupRetentionInput?.addEventListener("input", () => {
+      app.store.state.app.backupRetention = clampNumber(
+        Number(app.refs.backupRetentionInput.value),
+        BACKUP_RETENTION_MIN,
+        BACKUP_RETENTION_MAX,
+        5
+      );
+      app.saveState();
+      updateBackupStatus();
+    });
+
+    app.refs.chooseBackupDirectoryButton?.addEventListener("click", async () => {
+      const result = await app.desktopPanel?.chooseBackupDirectory?.();
+      if (result?.canceled || !result?.directory) return;
+      app.store.state.app.backupDirectory = result.directory;
+      app.store.state.app.autoBackupEnabled = true;
+      app.saveState();
+      app.showDragToast(`备份目录已设置为 ${result.directory}`);
+      await syncSettingsDialogFields();
+    });
+
+    app.refs.backupNowButton?.addEventListener("click", () => void writeAutomaticBackup("手动备份"));
+    app.refs.restorePointButton?.addEventListener("click", () => restoreLatestPoint());
+
     app.refs.exportDataButton?.addEventListener("click", () => void exportDataToFile());
     app.refs.importDataButton?.addEventListener("click", () => void importDataFromFile());
     app.refs.importDesktopButton?.addEventListener("click", () => void importShortcutLocation("desktop"));
@@ -364,6 +529,229 @@ export function registerDialogFeature(app) {
     app.refs.closeWindowButton.addEventListener("click", () => app.desktopPanel?.closeWindow?.());
 
     app.bindExternalShortcutDrop();
+  }
+
+  function scheduleAutomaticBackup() {
+    clearTimeout(backupTimer);
+    if (!app.store.state.app.autoBackupEnabled || !app.store.state.app.backupDirectory) return;
+    backupTimer = setTimeout(() => {
+      void writeAutomaticBackup("自动备份", { silent: true });
+    }, 1200);
+  }
+
+  function syncProfileOptions() {
+    if (!app.refs.profileSelect) return;
+    syncActiveProfileState(app.store.state);
+    const currentValue = app.refs.profileSelect.value;
+    app.refs.profileSelect.innerHTML = "";
+    app.store.state.profiles.forEach((profile) => {
+      const option = document.createElement("option");
+      option.value = profile.id;
+      option.textContent = profile.name;
+      app.refs.profileSelect.appendChild(option);
+    });
+    app.refs.profileSelect.value = app.store.state.activeProfileId || currentValue;
+    if (app.refs.profileNameInput) {
+      const activeProfile = getActiveProfile();
+      app.refs.profileNameInput.value = activeProfile?.name || "默认配置";
+    }
+    updateProfileStatus();
+  }
+
+  function switchProfile(profileId) {
+    if (!profileId || profileId === app.store.state.activeProfileId) return;
+    if (!applyProfileSnapshot(app.store.state, profileId)) return;
+    app.runtime.searchQuery = "";
+    app.runtime.recentPage = 0;
+    app.runtime.selectedItemIds.clear();
+    app.runtime.selectionAnchorGroupId = null;
+    app.applyLayout();
+    app.desktopPanel?.setWindowSize?.(app.store.state.layout.windowWidth);
+    app.saveState();
+    app.render();
+    void syncSettingsDialogFields();
+    app.showDragToast(`已切换到 ${getActiveProfile()?.name || "配置"}`);
+  }
+
+  function createProfileFromCurrent() {
+    syncActiveProfileState(app.store.state);
+    const requestedName = app.refs.profileNameInput?.value.trim();
+    const name = requestedName || getNextProfileName(app.store.state);
+    const profile = createProfileSnapshot(app.store.state, { name });
+    app.store.state.profiles.push(profile);
+    app.store.state.activeProfileId = profile.id;
+    app.saveState();
+    syncProfileOptions();
+    app.showDragToast(`已创建配置：${profile.name}`);
+  }
+
+  function renameCurrentProfile() {
+    const profile = getActiveProfile();
+    const nextName = app.refs.profileNameInput?.value.trim();
+    if (!profile || !nextName) return;
+    profile.name = nextName;
+    app.saveState();
+    syncProfileOptions();
+    app.showDragToast(`已重命名为 ${nextName}`);
+  }
+
+  function getActiveProfile() {
+    return app.store.state.profiles?.find((profile) => profile.id === app.store.state.activeProfileId) || null;
+  }
+
+  function updateProfileStatus() {
+    if (!app.refs.profileStatus) return;
+    const profile = getActiveProfile();
+    const count = app.store.state.profiles?.length || 1;
+    app.refs.profileStatus.textContent = `当前：${profile?.name || "默认配置"}；共 ${count} 个配置。切换前会自动保存当前图标、分组和布局。`;
+  }
+
+  function applyLayoutPreset(value) {
+    const presetName = sanitizeLayoutPreset(value);
+    const preset = LAYOUT_PRESETS[presetName];
+    if (!preset) {
+      app.store.state.layout.layoutPreset = "custom";
+      app.saveState();
+      return;
+    }
+
+    app.store.state.layout.layoutPreset = presetName;
+    app.store.state.layout.iconSize = preset.iconSize;
+    app.store.state.layout.windowWidth = preset.windowWidth;
+    app.store.state.layout.trackCount = preset.trackCount;
+    app.store.state.layout.showItemLabel = preset.showItemLabel;
+    app.applyLayout();
+    app.saveState();
+    app.render();
+    void app.desktopPanel?.setWindowSize?.(app.store.state.layout.windowWidth);
+    void syncSettingsDialogFields();
+  }
+
+  function updateAppearanceHint() {
+    if (!app.refs.appearanceHint) return;
+    const theme = THEME_OPTIONS[app.store.state.layout.theme] || THEME_OPTIONS.aurora;
+    app.refs.appearanceHint.textContent = `当前主题：${theme.label}；面板透明度 ${app.store.state.layout.panelOpacity}%。`;
+  }
+
+  function syncSearchEngineFields() {
+    const engine = sanitizeSearchEngine(app.store.state.layout.searchEngine);
+    app.store.state.layout.searchEngine = engine;
+    if (app.refs.searchEngineSelect) app.refs.searchEngineSelect.value = engine;
+    if (app.refs.settingsSearchEngineSelect) app.refs.settingsSearchEngineSelect.value = engine;
+    if (app.refs.searchEngineHint) {
+      const label = app.refs.settingsSearchEngineSelect?.selectedOptions?.[0]?.textContent || engine;
+      app.refs.searchEngineHint.textContent = `搜索框中按 Enter 会使用 ${label} 搜索当前关键词。`;
+    }
+  }
+
+  function createRestorePoint(label = "恢复点") {
+    const point = {
+      id: crypto.randomUUID(),
+      label: String(label || "恢复点"),
+      createdAt: new Date().toISOString(),
+      content: buildExportPayload(app.store)
+    };
+    app.store.state.ui.restorePoints = [point, ...(app.store.state.ui.restorePoints || [])].slice(0, 3);
+    saveStateNow();
+    updateBackupStatus();
+    return point;
+  }
+
+  async function writeAutomaticBackup(label = "自动备份", { silent = false } = {}) {
+    const config = app.store.state.app;
+    const retention = clampNumber(config.backupRetention, BACKUP_RETENTION_MIN, BACKUP_RETENTION_MAX, 5);
+    if (!config.autoBackupEnabled || !config.backupDirectory) {
+      if (!silent) {
+        app.showDragToast("请先开启自动备份并选择备份目录");
+        app.reportIssue?.("备份未配置", "需要先在设置中选择备份目录");
+      }
+      updateBackupStatus();
+      return null;
+    }
+
+    try {
+      const result = await app.desktopPanel?.writeBackupFile?.(
+        buildExportPayload(app.store),
+        config.backupDirectory,
+        retention
+      );
+      config.backupRetention = retention;
+      config.lastBackupAt = new Date().toISOString();
+      config.lastBackupPath = String(result?.filePath || "");
+      saveStateNow();
+      updateBackupStatus();
+      if (!silent) app.showDragToast(`${label}完成`);
+      return result;
+    } catch {
+      updateBackupStatus();
+      if (!silent) app.showDragToast("备份失败，请检查目录权限");
+      app.reportIssue?.("备份失败", "请检查备份目录是否存在且可写");
+      return null;
+    }
+  }
+
+  function restoreLatestPoint() {
+    const [latestPoint] = app.store.state.ui.restorePoints || [];
+    if (!latestPoint?.content) {
+      app.showDragToast("暂无可恢复的导入前状态");
+      app.reportIssue?.("暂无恢复点", "恢复点会在导入数据前自动创建");
+      return;
+    }
+
+    try {
+      const nextState = app.hydrateState(extractImportedState(JSON.parse(latestPoint.content)));
+      app.store.state = mergeLocalRecoveryState(nextState, app.store.state);
+      saveStateNow();
+      app.applyLayout();
+      app.desktopPanel?.setSnapEnabled?.(app.store.state.app.snapToEdge);
+      void app.syncWindowBehavior?.();
+      app.render();
+      if (app.refs.settingsDialog.open) void syncSettingsDialogFields();
+      app.showDragToast(`已恢复：${latestPoint.label}`);
+    } catch {
+      app.showDragToast("恢复失败，该恢复点不可用");
+      app.reportIssue?.("恢复失败", "恢复点内容无法解析");
+    }
+  }
+
+  function updateBackupStatus() {
+    if (app.refs.autoBackupEnabledInput) {
+      app.refs.autoBackupEnabledInput.checked = !!app.store.state.app.autoBackupEnabled;
+    }
+    if (app.refs.backupRetentionInput) {
+      app.refs.backupRetentionInput.value = String(
+        clampNumber(app.store.state.app.backupRetention, BACKUP_RETENTION_MIN, BACKUP_RETENTION_MAX, 5)
+      );
+    }
+    if (!app.refs.backupStatus) return;
+
+    const { backupDirectory, lastBackupAt, lastBackupPath } = app.store.state.app;
+    const restoreCount = app.store.state.ui.restorePoints?.length || 0;
+    if (!backupDirectory) {
+      app.refs.backupStatus.textContent = `尚未配置备份目录，当前有 ${restoreCount} 个导入前恢复点。`;
+      return;
+    }
+
+    const lastBackupText = lastBackupAt ? new Date(lastBackupAt).toLocaleString() : "尚未备份";
+    const locationText = lastBackupPath || backupDirectory;
+    app.refs.backupStatus.textContent = `目录：${locationText}；最近备份：${lastBackupText}；保留 ${app.store.state.app.backupRetention} 份；恢复点 ${restoreCount} 个。`;
+  }
+
+  function mergeLocalRecoveryState(nextState, currentState) {
+    nextState.ui.restorePoints = Array.isArray(currentState.ui?.restorePoints)
+      ? currentState.ui.restorePoints
+      : [];
+    nextState.app.autoBackupEnabled = currentState.app?.autoBackupEnabled === true;
+    nextState.app.backupDirectory = String(currentState.app?.backupDirectory || "");
+    nextState.app.backupRetention = clampNumber(
+      currentState.app?.backupRetention,
+      BACKUP_RETENTION_MIN,
+      BACKUP_RETENTION_MAX,
+      5
+    );
+    nextState.app.lastBackupAt = String(currentState.app?.lastBackupAt || "");
+    nextState.app.lastBackupPath = String(currentState.app?.lastBackupPath || "");
+    return nextState;
   }
 
   function refreshGroupOptions(select, includeAuto = true) {
@@ -461,6 +849,20 @@ export function registerDialogFeature(app) {
   }
 
   async function syncSettingsDialogFields() {
+    syncProfileOptions();
+    if (app.refs.layoutPresetSelect) {
+      app.refs.layoutPresetSelect.value = sanitizeLayoutPreset(app.store.state.layout.layoutPreset);
+    }
+    if (app.refs.themeSelect) {
+      app.refs.themeSelect.value = sanitizeTheme(app.store.state.layout.theme);
+    }
+    if (app.refs.panelOpacityInput) {
+      app.refs.panelOpacityInput.value = String(
+        clampNumber(app.store.state.layout.panelOpacity, PANEL_OPACITY_MIN, PANEL_OPACITY_MAX, 78)
+      );
+    }
+    updateAppearanceHint();
+    syncSearchEngineFields();
     app.refs.iconSizeInput.value = String(app.store.state.layout.iconSize);
     app.refs.windowWidthInput.value = String(
       clampNumber(app.store.state.layout.windowWidth, WINDOW_WIDTH_MIN, WINDOW_WIDTH_MAX, 360)
@@ -474,6 +876,21 @@ export function registerDialogFeature(app) {
     app.refs.trackCountInput.value = String(app.store.state.layout.trackCount);
     app.updateTrackCountHint();
     app.refs.snapEdgeInput.checked = !!app.store.state.app.snapToEdge;
+    if (app.refs.autoHideOnBlurInput) app.refs.autoHideOnBlurInput.checked = !!app.store.state.app.autoHideOnBlur;
+    if (app.refs.snapEdgeSelect) app.refs.snapEdgeSelect.value = sanitizeSnapEdge(app.store.state.app.snapEdge);
+    if (app.refs.snapDistanceInput) {
+      app.refs.snapDistanceInput.value = String(app.store.state.app.snapDistance || 14);
+    }
+    if (app.refs.revealDelayInput) {
+      app.refs.revealDelayInput.value = String(app.store.state.app.revealDelay || 250);
+    }
+    updateWindowBehaviorHints();
+    if (app.refs.globalShortcutEnabledInput) {
+      app.refs.globalShortcutEnabledInput.checked = !!app.store.state.app.globalShortcutEnabled;
+    }
+    if (app.refs.globalShortcutInput) {
+      app.refs.globalShortcutInput.value = app.store.state.app.globalShortcut || DEFAULT_GLOBAL_SHORTCUT;
+    }
     if (app.refs.launchAtLoginInput) {
       try {
         app.refs.launchAtLoginInput.checked = Boolean(await app.desktopPanel?.getLaunchAtLogin?.());
@@ -481,6 +898,7 @@ export function registerDialogFeature(app) {
         app.refs.launchAtLoginInput.checked = false;
       }
     }
+    updateBackupStatus();
   }
 
   async function openSettings() {
@@ -489,9 +907,66 @@ export function registerDialogFeature(app) {
     showDialogAtPoint(app.refs.settingsDialog);
   }
 
+  async function syncWindowBehavior() {
+    await syncNativeWindowBehavior();
+    await syncGlobalShortcut();
+  }
+
+  async function syncNativeWindowBehavior() {
+    await app.desktopPanel?.configureWindowBehavior?.({
+      autoHideEnabled: !!app.store.state.app.autoHideOnBlur,
+      snapEdge: sanitizeSnapEdge(app.store.state.app.snapEdge),
+      snapDistance: clampNumber(app.store.state.app.snapDistance, SNAP_DISTANCE_MIN, SNAP_DISTANCE_MAX, 14),
+      revealDelayMs: clampNumber(app.store.state.app.revealDelay, REVEAL_DELAY_MIN, REVEAL_DELAY_MAX, 250)
+    });
+  }
+
+  async function syncGlobalShortcut() {
+    const enabled = !!app.store.state.app.globalShortcutEnabled;
+    const shortcut = sanitizeShortcut(app.store.state.app.globalShortcut || DEFAULT_GLOBAL_SHORTCUT);
+    app.store.state.app.globalShortcut = shortcut;
+
+    if (app.refs.globalShortcutStatus) {
+      app.refs.globalShortcutStatus.textContent = enabled ? "正在注册快捷键..." : "全局快捷键已关闭。";
+    }
+
+    try {
+      const result = await app.desktopPanel?.configureGlobalShortcut?.(enabled, shortcut);
+      const applied = Boolean(result?.enabled);
+      app.store.state.app.globalShortcutEnabled = applied;
+      if (app.refs.globalShortcutEnabledInput) app.refs.globalShortcutEnabledInput.checked = applied;
+      if (app.refs.globalShortcutStatus) {
+        app.refs.globalShortcutStatus.textContent = applied
+          ? `已启用：${shortcut} 显示或隐藏面板。`
+          : "全局快捷键已关闭。";
+      }
+      app.saveState();
+    } catch {
+      app.store.state.app.globalShortcutEnabled = false;
+      if (app.refs.globalShortcutEnabledInput) app.refs.globalShortcutEnabledInput.checked = false;
+      if (app.refs.globalShortcutStatus) {
+        app.refs.globalShortcutStatus.textContent = "快捷键注册失败，可能被其他应用占用。";
+      }
+      app.saveState();
+    }
+  }
+
+  function updateWindowBehaviorHints() {
+    if (app.refs.snapDistanceHint) {
+      app.refs.snapDistanceHint.textContent = `当前吸附距离 ${app.store.state.app.snapDistance || 14} px。`;
+    }
+    if (app.refs.revealDelayHint) {
+      app.refs.revealDelayHint.textContent = `当前唤出延迟 ${app.store.state.app.revealDelay || 250} ms。`;
+    }
+  }
+
   function hideMenus() {
     app.refs.appContextMenu.hidden = true;
     app.refs.itemContextMenu.hidden = true;
+  }
+
+  function hasOpenDialog() {
+    return [app.refs.addDialog, app.refs.settingsDialog, app.refs.editDialog].some((dialog) => dialog?.open);
   }
 
   function openMenu(menu, x, y) {
@@ -570,6 +1045,7 @@ export function registerDialogFeature(app) {
       const shortcuts = (await app.desktopPanel?.scanShortcutLocations?.([source])) || [];
       if (!Array.isArray(shortcuts) || !shortcuts.length) {
         app.showDragToast("没有找到可导入的快捷方式");
+        app.reportIssue?.("没有找到快捷方式", "可尝试拖拽单个快捷方式到面板中");
         return;
       }
 
@@ -578,6 +1054,7 @@ export function registerDialogFeature(app) {
       app.showDragToast(`已导入 ${shortcuts.length} 个快捷方式`);
     } catch {
       app.showDragToast("批量导入失败，请稍后重试");
+      app.reportIssue?.("批量导入失败", "请稍后重试或检查快捷方式位置权限");
     }
   }
 

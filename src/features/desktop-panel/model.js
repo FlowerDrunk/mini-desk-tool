@@ -1,12 +1,41 @@
-export const STORAGE_KEY = "desktop-panel-state-v8";
-export const LEGACY_STORAGE_KEYS = ["desktop-panel-state-v7", "desktop-panel-state-v6"];
+export const STORAGE_KEY = "desktop-panel-state-v9";
+export const LEGACY_STORAGE_KEYS = ["desktop-panel-state-v8", "desktop-panel-state-v7", "desktop-panel-state-v6"];
 export const DEFAULT_GROUP_ID = "group-default";
+export const DEFAULT_PROFILE_ID = "profile-default";
 export const NEW_AUTO_GROUP = "__new_auto_group__";
+export const DEFAULT_GLOBAL_SHORTCUT = "CommandOrControl+Alt+Space";
 export const TRACK_COUNT_MIN = 1;
 export const TRACK_COUNT_MAX = 4;
 export const DEFAULT_GAP = 14;
 export const WINDOW_WIDTH_MIN = 300;
 export const WINDOW_WIDTH_MAX = 560;
+export const SNAP_DISTANCE_MIN = 4;
+export const SNAP_DISTANCE_MAX = 64;
+export const REVEAL_DELAY_MIN = 0;
+export const REVEAL_DELAY_MAX = 1500;
+export const BACKUP_RETENTION_MIN = 1;
+export const BACKUP_RETENTION_MAX = 12;
+export const PANEL_OPACITY_MIN = 58;
+export const PANEL_OPACITY_MAX = 96;
+
+export const LAYOUT_PRESETS = {
+  compact: { label: "紧凑", iconSize: 48, windowWidth: 300, trackCount: 3, showItemLabel: false },
+  standard: { label: "标准", iconSize: 58, windowWidth: 360, trackCount: 3, showItemLabel: true },
+  wide: { label: "宽屏", iconSize: 64, windowWidth: 520, trackCount: 4, showItemLabel: true }
+};
+
+export const THEME_OPTIONS = {
+  aurora: { label: "极光蓝", accent: "#75ffd9", accent2: "#59acff", accentRgb: "117, 255, 217", accent2Rgb: "89, 172, 255", surface: "17, 21, 27" },
+  graphite: { label: "石墨灰", accent: "#d7e0ea", accent2: "#8ea1b8", accentRgb: "215, 224, 234", accent2Rgb: "142, 161, 184", surface: "18, 20, 23" },
+  sand: { label: "暖沙金", accent: "#ffd27a", accent2: "#ff8f5a", accentRgb: "255, 210, 122", accent2Rgb: "255, 143, 90", surface: "34, 27, 20" }
+};
+
+export const SEARCH_ENGINES = {
+  bing: { label: "Bing", url: "https://www.bing.com/search?q=" },
+  baidu: { label: "百度", url: "https://www.baidu.com/s?wd=" },
+  google: { label: "Google", url: "https://www.google.com/search?q=" },
+  duckduckgo: { label: "DuckDuckGo", url: "https://duckduckgo.com/?q=" }
+};
 
 export const SIZE_META = {
   "1x1": { colSpan: 1, rowSpan: 1, widthScale: 1, heightScale: 1, frameInsetX: 0, frameInsetY: 0, iconPadX: 6, iconPadY: 6, wrapRadius: 18, iconRadius: 16 },
@@ -26,13 +55,31 @@ export function createDefaultState() {
       showSearch: true,
       showRecent: true,
       flowDirection: "ltr",
-      trackCount: 3
+      trackCount: 3,
+      layoutPreset: "standard",
+      theme: "aurora",
+      panelOpacity: 78,
+      searchEngine: "bing"
     },
     ui: {
       collapsedGroupIds: [],
-      recentItemIds: []
+      recentItemIds: [],
+      restorePoints: []
     },
-    app: { snapToEdge: true },
+    app: {
+      snapToEdge: true,
+      autoHideOnBlur: false,
+      snapEdge: "auto",
+      snapDistance: 14,
+      revealDelay: 250,
+      globalShortcutEnabled: false,
+      globalShortcut: DEFAULT_GLOBAL_SHORTCUT,
+      autoBackupEnabled: false,
+      backupDirectory: "",
+      backupRetention: 5,
+      lastBackupAt: "",
+      lastBackupPath: ""
+    },
     groups: [
       {
         id: DEFAULT_GROUP_ID,
@@ -60,7 +107,9 @@ export function createDefaultState() {
           }
         ]
       }
-    ]
+    ],
+    activeProfileId: DEFAULT_PROFILE_ID,
+    profiles: []
   };
 }
 
@@ -79,43 +128,10 @@ export function loadState() {
 export function hydrateState(parsed) {
   if (Array.isArray(parsed)) return migrateFromLegacyArray(parsed);
 
-  const layout = {
-    iconSize: clampNumber(parsed?.layout?.iconSize, 42, 76, 58),
-    windowWidth: clampNumber(parsed?.layout?.windowWidth, WINDOW_WIDTH_MIN, WINDOW_WIDTH_MAX, 360),
-    showGroupTitle: parsed?.layout?.showGroupTitle !== false,
-    showItemLabel: parsed?.layout?.showItemLabel !== false,
-    showAddTile: parsed?.layout?.showAddTile === true,
-    showSearch: parsed?.layout?.showSearch !== false,
-    showRecent: parsed?.layout?.showRecent !== false,
-    flowDirection: parsed?.layout?.flowDirection === "rtl" ? "rtl" : "ltr",
-    trackCount: clampNumber(parsed?.layout?.trackCount, TRACK_COUNT_MIN, TRACK_COUNT_MAX, 3)
-  };
-
-  const appConfig = {
-    snapToEdge: parsed?.app?.snapToEdge !== false
-  };
-
-  const ui = {
-    collapsedGroupIds: Array.isArray(parsed?.ui?.collapsedGroupIds)
-      ? parsed.ui.collapsedGroupIds.filter((id) => typeof id === "string")
-      : [],
-    recentItemIds: Array.isArray(parsed?.ui?.recentItemIds)
-      ? parsed.ui.recentItemIds.filter((id) => typeof id === "string").slice(0, 10)
-      : []
-  };
-
-  const groups = Array.isArray(parsed?.groups)
-    ? parsed.groups
-        .map((group) => ({
-          id: group?.id || crypto.randomUUID(),
-          name: repairDisplayText(String(group?.name || "未命名组").trim() || "未命名组"),
-          items: Array.isArray(group?.items)
-            ? group.items
-                .filter((item) => item && typeof item.title === "string" && typeof item.url === "string")
-                .map((item) => normalizeItem(item))
-            : []
-        }))
-    : [];
+  const layout = hydrateLayout(parsed?.layout);
+  const appConfig = hydrateAppConfig(parsed?.app);
+  const ui = hydrateUi(parsed?.ui);
+  const groups = hydrateGroups(parsed?.groups);
 
   if (!groups.length) {
     groups.push({ id: DEFAULT_GROUP_ID, name: "常用", items: [] });
@@ -124,11 +140,18 @@ export function hydrateState(parsed) {
   ui.collapsedGroupIds = ui.collapsedGroupIds.filter((id) => groups.some((group) => group.id === id));
   ui.recentItemIds = ui.recentItemIds.filter((id) => groups.some((group) => group.items.some((item) => item.id === id)));
 
-  return { layout, ui, app: appConfig, groups };
+  const activeProfileId =
+    typeof parsed?.activeProfileId === "string" && parsed.activeProfileId.trim()
+      ? parsed.activeProfileId
+      : DEFAULT_PROFILE_ID;
+  const profiles = normalizeProfiles(parsed?.profiles, { activeProfileId, layout, ui, groups });
+  const state = { layout, ui, app: appConfig, groups, activeProfileId, profiles };
+  syncActiveProfileState(state);
+  return state;
 }
 
 export function migrateFromLegacyArray(items) {
-  return {
+  const state = {
     layout: structuredClone(createDefaultState().layout),
     ui: structuredClone(createDefaultState().ui),
     app: structuredClone(createDefaultState().app),
@@ -140,8 +163,12 @@ export function migrateFromLegacyArray(items) {
           .filter((item) => item && typeof item.title === "string" && typeof item.url === "string")
           .map((item) => normalizeItem({ ...item, size: "1x1" }))
       }
-    ]
+    ],
+    activeProfileId: DEFAULT_PROFILE_ID,
+    profiles: []
   };
+  state.profiles = [createProfileSnapshot(state, { id: DEFAULT_PROFILE_ID, name: "默认配置" })];
+  return state;
 }
 
 export function normalizeItem(item) {
@@ -157,17 +184,55 @@ export function normalizeItem(item) {
   };
 }
 
+export function sanitizeShortcut(value) {
+  const shortcut = String(value || "").trim().replace(/\s+/g, "");
+  return shortcut || DEFAULT_GLOBAL_SHORTCUT;
+}
+
+export function sanitizeSnapEdge(value) {
+  const edge = String(value || "").trim().toLowerCase();
+  return ["auto", "left", "right", "top", "bottom"].includes(edge) ? edge : "auto";
+}
+
+export function sanitizeLayoutPreset(value) {
+  const preset = String(value || "").trim().toLowerCase();
+  return preset in LAYOUT_PRESETS ? preset : "custom";
+}
+
+export function sanitizeTheme(value) {
+  const theme = String(value || "").trim().toLowerCase();
+  return theme in THEME_OPTIONS ? theme : "aurora";
+}
+
+export function sanitizeSearchEngine(value) {
+  const engine = String(value || "").trim().toLowerCase();
+  return engine in SEARCH_ENGINES ? engine : "bing";
+}
+
 export function saveState(store) {
+  syncActiveProfileState(store.state);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(store.state));
 }
 
 export function buildExportPayload(store) {
+  syncActiveProfileState(store.state);
+  const state = structuredClone(store.state);
+  if (state.ui) state.ui.restorePoints = [];
+  if (Array.isArray(state.profiles)) {
+    state.profiles = state.profiles.map((profile) => ({
+      ...profile,
+      ui: {
+        collapsedGroupIds: Array.isArray(profile.ui?.collapsedGroupIds) ? profile.ui.collapsedGroupIds : [],
+        recentItemIds: Array.isArray(profile.ui?.recentItemIds) ? profile.ui.recentItemIds : []
+      }
+    }));
+  }
   return JSON.stringify(
     {
       app: "Mini Desk Tool",
-      schemaVersion: 1,
+      schemaVersion: 2,
       exportedAt: new Date().toISOString(),
-      state: store.state
+      state
     },
     null,
     2
@@ -189,6 +254,71 @@ export function ensureValidGroups(store) {
     store.state.groups.push({ id: DEFAULT_GROUP_ID, name: "常用", items: [] });
   }
   pruneUiState(store);
+  syncActiveProfileState(store.state);
+}
+
+export function createProfileSnapshot(state, overrides = {}) {
+  return {
+    id: overrides.id || crypto.randomUUID(),
+    name: String(overrides.name || "新配置").trim() || "新配置",
+    layout: structuredClone(state.layout),
+    ui: {
+      collapsedGroupIds: Array.isArray(state.ui?.collapsedGroupIds) ? [...state.ui.collapsedGroupIds] : [],
+      recentItemIds: Array.isArray(state.ui?.recentItemIds) ? [...state.ui.recentItemIds] : []
+    },
+    groups: structuredClone(state.groups),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+export function syncActiveProfileState(state) {
+  if (!Array.isArray(state.profiles)) state.profiles = [];
+  if (!state.activeProfileId) state.activeProfileId = DEFAULT_PROFILE_ID;
+  let profile = state.profiles.find((entry) => entry.id === state.activeProfileId);
+  if (!profile) {
+    profile = createProfileSnapshot(state, {
+      id: state.activeProfileId,
+      name: state.activeProfileId === DEFAULT_PROFILE_ID ? "默认配置" : "新配置"
+    });
+    state.profiles.unshift(profile);
+  }
+
+  profile.layout = structuredClone(state.layout);
+  profile.ui = {
+    collapsedGroupIds: Array.isArray(state.ui?.collapsedGroupIds) ? [...state.ui.collapsedGroupIds] : [],
+    recentItemIds: Array.isArray(state.ui?.recentItemIds) ? [...state.ui.recentItemIds] : []
+  };
+  profile.groups = structuredClone(state.groups);
+  profile.updatedAt = new Date().toISOString();
+}
+
+export function applyProfileSnapshot(state, profileId) {
+  const profile = state.profiles?.find((entry) => entry.id === profileId);
+  if (!profile) return false;
+  syncActiveProfileState(state);
+  const restorePoints = Array.isArray(state.ui?.restorePoints) ? state.ui.restorePoints : [];
+  state.activeProfileId = profile.id;
+  state.layout = hydrateLayout(profile.layout);
+  state.ui = {
+    ...hydrateUi(profile.ui),
+    restorePoints
+  };
+  state.groups = hydrateGroups(profile.groups);
+  if (!state.groups.length) {
+    state.groups.push({ id: DEFAULT_GROUP_ID, name: "常用", items: [] });
+  }
+  return true;
+}
+
+export function getNextProfileName(state) {
+  const taken = new Set((state.profiles || []).map((profile) => profile.name));
+  let index = 2;
+  let name = "新配置";
+  while (taken.has(name)) {
+    name = `新配置 ${index}`;
+    index += 1;
+  }
+  return name;
 }
 
 function pruneUiState(store) {
@@ -203,6 +333,118 @@ function pruneUiState(store) {
   store.state.ui.recentItemIds = Array.isArray(store.state.ui.recentItemIds)
     ? store.state.ui.recentItemIds.filter((id) => itemIds.has(id)).slice(0, 10)
     : [];
+  store.state.ui.restorePoints = Array.isArray(store.state.ui.restorePoints)
+    ? store.state.ui.restorePoints.filter((entry) => entry && typeof entry.content === "string").slice(0, 3)
+    : [];
+}
+
+function hydrateLayout(input) {
+  return {
+    iconSize: clampNumber(input?.iconSize, 42, 76, 58),
+    windowWidth: clampNumber(input?.windowWidth, WINDOW_WIDTH_MIN, WINDOW_WIDTH_MAX, 360),
+    showGroupTitle: input?.showGroupTitle !== false,
+    showItemLabel: input?.showItemLabel !== false,
+    showAddTile: input?.showAddTile === true,
+    showSearch: input?.showSearch !== false,
+    showRecent: input?.showRecent !== false,
+    flowDirection: input?.flowDirection === "rtl" ? "rtl" : "ltr",
+    trackCount: clampNumber(input?.trackCount, TRACK_COUNT_MIN, TRACK_COUNT_MAX, 3),
+    layoutPreset: sanitizeLayoutPreset(input?.layoutPreset || "standard"),
+    theme: sanitizeTheme(input?.theme),
+    panelOpacity: clampNumber(input?.panelOpacity, PANEL_OPACITY_MIN, PANEL_OPACITY_MAX, 78),
+    searchEngine: sanitizeSearchEngine(input?.searchEngine)
+  };
+}
+
+function hydrateAppConfig(input) {
+  return {
+    snapToEdge: input?.snapToEdge !== false,
+    autoHideOnBlur: input?.autoHideOnBlur === true,
+    snapEdge: sanitizeSnapEdge(input?.snapEdge),
+    snapDistance: clampNumber(input?.snapDistance, SNAP_DISTANCE_MIN, SNAP_DISTANCE_MAX, 14),
+    revealDelay: clampNumber(input?.revealDelay, REVEAL_DELAY_MIN, REVEAL_DELAY_MAX, 250),
+    globalShortcutEnabled: input?.globalShortcutEnabled === true,
+    globalShortcut: sanitizeShortcut(input?.globalShortcut || DEFAULT_GLOBAL_SHORTCUT),
+    autoBackupEnabled: input?.autoBackupEnabled === true,
+    backupDirectory: String(input?.backupDirectory || ""),
+    backupRetention: clampNumber(input?.backupRetention, BACKUP_RETENTION_MIN, BACKUP_RETENTION_MAX, 5),
+    lastBackupAt: String(input?.lastBackupAt || ""),
+    lastBackupPath: String(input?.lastBackupPath || "")
+  };
+}
+
+function hydrateUi(input) {
+  return {
+    collapsedGroupIds: Array.isArray(input?.collapsedGroupIds)
+      ? input.collapsedGroupIds.filter((id) => typeof id === "string")
+      : [],
+    recentItemIds: Array.isArray(input?.recentItemIds)
+      ? input.recentItemIds.filter((id) => typeof id === "string").slice(0, 10)
+      : [],
+    restorePoints: Array.isArray(input?.restorePoints)
+      ? input.restorePoints.filter((entry) => entry && typeof entry.content === "string").slice(0, 3)
+      : []
+  };
+}
+
+function hydrateGroups(input) {
+  return Array.isArray(input)
+    ? input.map((group) => ({
+        id: group?.id || crypto.randomUUID(),
+        name: repairDisplayText(String(group?.name || "未命名组").trim() || "未命名组"),
+        items: Array.isArray(group?.items)
+          ? group.items
+              .filter((item) => item && typeof item.title === "string" && typeof item.url === "string")
+              .map((item) => normalizeItem(item))
+          : []
+      }))
+    : [];
+}
+
+function normalizeProfiles(input, current) {
+  const profiles = Array.isArray(input)
+    ? input
+        .map((profile) => {
+          if (!profile || typeof profile !== "object") return null;
+          const id = String(profile.id || "").trim() || crypto.randomUUID();
+          const name = String(profile.name || "未命名配置").trim() || "未命名配置";
+          const groups = hydrateGroups(profile.groups);
+          return {
+            id,
+            name,
+            layout: hydrateLayout(profile.layout),
+            ui: {
+              collapsedGroupIds: Array.isArray(profile.ui?.collapsedGroupIds)
+                ? profile.ui.collapsedGroupIds.filter((entry) => typeof entry === "string")
+                : [],
+              recentItemIds: Array.isArray(profile.ui?.recentItemIds)
+                ? profile.ui.recentItemIds.filter((entry) => typeof entry === "string").slice(0, 10)
+                : []
+            },
+            groups: groups.length ? groups : [{ id: DEFAULT_GROUP_ID, name: "常用", items: [] }],
+            updatedAt: String(profile.updatedAt || "")
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  if (!profiles.some((profile) => profile.id === current.activeProfileId)) {
+    profiles.unshift(
+      createProfileSnapshot(
+        {
+          layout: current.layout,
+          ui: current.ui,
+          groups: current.groups
+        },
+        {
+          id: current.activeProfileId,
+          name: current.activeProfileId === DEFAULT_PROFILE_ID ? "默认配置" : "当前配置"
+        }
+      )
+    );
+  }
+
+  return profiles;
 }
 
 export function findGroup(store, groupId) {

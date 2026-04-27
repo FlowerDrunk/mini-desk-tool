@@ -1,7 +1,7 @@
 const path = require("path");
 const { test, expect } = require("@playwright/test");
 
-const STORAGE_KEY = "desktop-panel-state-v8";
+const STORAGE_KEY = "desktop-panel-state-v9";
 const mockScriptPath = path.join(__dirname, "helpers", "mockDesktopPanel.js");
 
 function svgIconDataUrl(text, color = "#1d4ed8") {
@@ -165,7 +165,7 @@ test("reorders items through drag and drop without opening them", async ({ page 
   await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.openUrl)).toEqual([]);
 });
 
-test("filters items, opens the first search result, and records recent items", async ({ page }) => {
+test("filters items, searches with the selected engine, and records clicked recent items", async ({ page }) => {
   await gotoAppWithState(page, {
     layout: {
       iconSize: 58,
@@ -185,7 +185,7 @@ test("filters items, opens the first search result, and records recent items", a
         id: "dev-group",
         name: "Dev",
         items: [
-          { id: "github-item", title: "GitHub", description: "code hosting", url: "https://github.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "github-item", title: "GitHub", description: "code hosting", url: "https://github.com", size: "2x2", iconMode: "default", customIcon: "", shortcutIcon: "" },
           { id: "docs-item", title: "Docs", description: "reference", url: "https://docs.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
         ]
       },
@@ -203,13 +203,20 @@ test("filters items, opens the first search result, and records recent items", a
   await page.fill("#searchInput", "github");
   await expect(page.locator(".tile .label")).toHaveText(["GitHub"]);
 
+  await page.selectOption("#searchEngineSelect", "baidu");
   await page.keyboard.press("Enter");
-  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.openUrl)).toEqual([
-    "https://github.com"
-  ]);
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.openUrl.at(-1))).toBe(
+    "https://www.baidu.com/s?wd=github"
+  );
 
   await page.click("#clearSearchButton");
+  await page.locator('.tile[data-item-id="github-item"]').click();
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.openUrl.at(-1))).toBe(
+    "https://github.com"
+  );
   await expect(page.locator(".recent-group .tile .label")).toHaveText(["GitHub"]);
+  await expect(page.locator('.recent-group .tile[data-item-id="github-item"]')).toHaveAttribute("data-size", "1x1");
+  await expect(page.locator('.group[data-group-id="dev-group"] .tile[data-item-id="github-item"]')).toHaveAttribute("data-size", "2x2");
 });
 
 test("can hide the search box from settings", async ({ page }) => {
@@ -457,6 +464,180 @@ test("updates settings and calls desktop integration hooks", async ({ page }) =>
   });
 });
 
+test("configures window behavior settings", async ({ page }) => {
+  await gotoApp(page);
+  await openSettings(page);
+
+  await page.check("#autoHideOnBlurInput");
+  await page.selectOption("#snapEdgeSelect", "left");
+  await setRangeValue(page, "#snapDistanceInput", 24);
+  await setRangeValue(page, "#revealDelayInput", 400);
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.configureWindowBehavior.at(-1))).toEqual({
+    autoHideEnabled: true,
+    snapEdge: "left",
+    snapDistance: 24,
+    revealDelayMs: 400
+  });
+  await expect(page.locator("#snapDistanceHint")).toHaveText("当前吸附距离 24 px。");
+  await expect(page.locator("#revealDelayHint")).toHaveText("当前唤出延迟 400 ms。");
+
+  await page.check("#globalShortcutEnabledInput");
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.configureGlobalShortcut.at(-1))).toEqual({
+    enabled: true,
+    shortcut: "CommandOrControl+Alt+Space"
+  });
+  await expect(page.locator("#globalShortcutStatus")).toContainText("已启用");
+
+  await page.fill("#globalShortcutInput", "CommandOrControl+Shift+M");
+  await page.locator("#globalShortcutInput").dispatchEvent("change");
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.configureGlobalShortcut.at(-1))).toEqual({
+    enabled: true,
+    shortcut: "CommandOrControl+Shift+M"
+  });
+
+  await page.click("#cancelSettingsDialog");
+  await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.closeWindow.length)).toBe(1);
+
+  const state = await getStoredState(page);
+  expect(state.app.autoHideOnBlur).toBe(true);
+  expect(state.app.snapEdge).toBe("left");
+  expect(state.app.snapDistance).toBe(24);
+  expect(state.app.revealDelay).toBe(400);
+  expect(state.app.globalShortcutEnabled).toBe(true);
+  expect(state.app.globalShortcut).toBe("CommandOrControl+Shift+M");
+});
+
+test("applies layout presets and appearance settings", async ({ page }) => {
+  await gotoApp(page);
+  await openSettings(page);
+
+  await page.selectOption("#layoutPresetSelect", "wide");
+  await expect.poll(() => page.evaluate(() => ({
+    trackCount: getComputedStyle(document.documentElement).getPropertyValue("--track-count").trim(),
+    lastWindowSize: window.__desktopPanelMock.state.calls.setWindowSize.at(-1),
+    showLabels: document.querySelector("#appShell").dataset.showLabels
+  }))).toEqual({
+    trackCount: "4",
+    lastWindowSize: [520, undefined],
+    showLabels: "true"
+  });
+
+  await page.selectOption("#layoutPresetSelect", "compact");
+  await expect.poll(() => page.evaluate(() => ({
+    trackCount: getComputedStyle(document.documentElement).getPropertyValue("--track-count").trim(),
+    lastWindowSize: window.__desktopPanelMock.state.calls.setWindowSize.at(-1),
+    showLabels: document.querySelector("#appShell").dataset.showLabels
+  }))).toEqual({
+    trackCount: "3",
+    lastWindowSize: [300, undefined],
+    showLabels: "false"
+  });
+
+  await page.selectOption("#themeSelect", "sand");
+  await setRangeValue(page, "#panelOpacityInput", 88);
+  await expect(page.locator("#appearanceHint")).toContainText("暖沙金");
+  await expect.poll(() => page.evaluate(() => ({
+    theme: document.querySelector("#appShell").dataset.theme,
+    accent: getComputedStyle(document.documentElement).getPropertyValue("--theme-accent").trim(),
+    surface: getComputedStyle(document.documentElement).getPropertyValue("--theme-surface-rgb").trim(),
+    alpha: getComputedStyle(document.documentElement).getPropertyValue("--panel-alpha").trim()
+  }))).toEqual({
+    theme: "sand",
+    accent: "#ffd27a",
+    surface: "34, 27, 20",
+    alpha: "0.88"
+  });
+  const transparencyVars = await page.evaluate(() => {
+    const styles = getComputedStyle(document.documentElement);
+    return {
+      soft: Number(styles.getPropertyValue("--panel-alpha-soft")),
+      glow: Number(styles.getPropertyValue("--panel-bg-glow")),
+      tile: Number(styles.getPropertyValue("--tile-alpha"))
+    };
+  });
+  expect(transparencyVars.soft).toBeGreaterThan(0.54);
+  expect(transparencyVars.glow).toBeGreaterThan(0.18);
+  expect(transparencyVars.tile).toBeGreaterThan(0.2);
+
+  const state = await getStoredState(page);
+  expect(state.layout.layoutPreset).toBe("compact");
+  expect(state.layout.theme).toBe("sand");
+  expect(state.layout.panelOpacity).toBe(88);
+  expect(state.layout.searchEngine).toBe("bing");
+});
+
+test("changes the default search engine from settings", async ({ page }) => {
+  await gotoApp(page);
+  await openSettings(page);
+
+  await page.selectOption("#settingsSearchEngineSelect", "duckduckgo");
+  await expect(page.locator("#searchEngineHint")).toContainText("DuckDuckGo");
+  await expect(page.locator("#searchEngineSelect")).toHaveValue("duckduckgo");
+
+  await page.click("#cancelSettingsDialog");
+  await page.fill("#searchInput", "mini desk");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.openUrl.at(-1))).toBe(
+    "https://duckduckgo.com/?q=mini%20desk"
+  );
+
+  const state = await getStoredState(page);
+  expect(state.layout.searchEngine).toBe("duckduckgo");
+});
+
+test("switches profiles without losing profile-specific items", async ({ page }) => {
+  await gotoAppWithState(page, {
+    layout: {
+      iconSize: 58,
+      windowWidth: 360,
+      showGroupTitle: true,
+      showAddTile: false,
+      showSearch: true,
+      showRecent: true,
+      flowDirection: "ltr",
+      trackCount: 3
+    },
+    ui: {
+      collapsedGroupIds: [],
+      recentItemIds: []
+    },
+    app: { snapToEdge: true },
+    groups: [
+      {
+        id: "group-default",
+        name: "Default",
+        items: [
+          { id: "alpha-item", title: "Alpha", description: "", url: "https://alpha.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+  await openSettings(page);
+  await page.fill("#profileNameInput", "Work");
+  await page.click("#createProfileButton");
+  await expect(page.locator("#profileStatus")).toContainText("Work");
+  await page.click("#cancelSettingsDialog");
+
+  await openAppContextMenu(page);
+  await page.locator('#appContextMenu [data-action="add-icon"]').click();
+  await page.fill("#addTitleInput", "Work Tool");
+  await page.fill("#addUrlInput", "https://work.example.com");
+  await page.locator('#addForm button[type="submit"]').click();
+  await expect(page.locator(".tile .label")).toHaveText(["Work Tool", "Alpha"]);
+
+  await openSettings(page);
+  await page.selectOption("#profileSelect", { label: "默认配置" });
+  await expect(page.locator(".tile .label")).toHaveText(["Alpha"]);
+
+  await page.selectOption("#profileSelect", { label: "Work" });
+  await expect(page.locator(".tile .label")).toHaveText(["Work Tool", "Alpha"]);
+
+  const state = await getStoredState(page);
+  expect(state.profiles.map((profile) => profile.name)).toEqual(expect.arrayContaining(["默认配置", "Work"]));
+  expect(state.activeProfileId).toBe(state.profiles.find((profile) => profile.name === "Work").id);
+});
+
 test("keeps the settings dialog open while applying settings", async ({ page }) => {
   await gotoApp(page);
   await openSettings(page);
@@ -576,6 +757,114 @@ test("exports, imports, and auto-groups items from settings", async ({ page }) =
 
   await page.click("#autoGroupButton");
   await expect(page.locator(".group")).toHaveCount(2);
+});
+
+test("configures backup directory and writes manual backups", async ({ page }) => {
+  await gotoApp(page);
+  await openSettings(page);
+
+  await page.evaluate(() => {
+    window.__desktopPanelMock.setBackupDirectory("C:\\\\MiniDeskBackups");
+  });
+  await page.click("#chooseBackupDirectoryButton");
+  await expect(page.locator("#autoBackupEnabledInput")).toBeChecked();
+  await expect(page.locator("#backupStatus")).toContainText("MiniDeskBackups");
+
+  await page.click("#backupNowButton");
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.writeBackupFile.at(-1))).toMatchObject({
+    directory: expect.stringContaining("MiniDeskBackups"),
+    retention: 5
+  });
+
+  const stored = await getStoredState(page);
+  expect(stored.app.autoBackupEnabled).toBe(true);
+  expect(stored.app.backupDirectory).toContain("MiniDeskBackups");
+  expect(stored.app.lastBackupPath).toContain("desktop-panel-backup");
+});
+
+test("creates a restore point before import and restores it from settings", async ({ page }) => {
+  await gotoAppWithState(page, {
+    layout: {
+      iconSize: 58,
+      windowWidth: 360,
+      showGroupTitle: true,
+      showAddTile: false,
+      showSearch: true,
+      flowDirection: "ltr",
+      trackCount: 3
+    },
+    ui: {
+      collapsedGroupIds: [],
+      recentItemIds: []
+    },
+    app: {
+      snapToEdge: true,
+      autoBackupEnabled: true,
+      backupDirectory: "C:\\MiniDeskBackups",
+      backupRetention: 2
+    },
+    groups: [
+      {
+        id: "group-default",
+        name: "Default",
+        items: [
+          { id: "alpha-item", title: "Alpha", description: "", url: "https://alpha.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+  await expect(page.locator(".tile .label")).toHaveText(["Alpha"]);
+  await openSettings(page);
+
+  await page.evaluate(() => {
+    window.__desktopPanelMock.setImportPayload({
+      state: {
+        layout: {
+          iconSize: 58,
+          windowWidth: 360,
+          showGroupTitle: true,
+          showAddTile: false,
+          showSearch: true,
+          flowDirection: "ltr",
+          trackCount: 3
+        },
+        app: { snapToEdge: true },
+        groups: [
+          {
+            id: "group-default",
+            name: "Imported",
+            items: [
+              { id: "beta-item", title: "Beta", description: "", url: "https://beta.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+            ]
+          }
+        ]
+      }
+    });
+  });
+
+  await page.click("#importDataButton");
+  await expect(page.locator(".tile .label")).toHaveText(["Beta"]);
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.writeBackupFile.at(-1))).toMatchObject({
+    directory: expect.stringContaining("MiniDeskBackups"),
+    retention: 2
+  });
+
+  await page.click("#restorePointButton");
+  await expect(page.locator(".tile .label")).toHaveText(["Alpha"]);
+});
+
+test("keeps current data when import fails and shows the issue center", async ({ page }) => {
+  await gotoApp(page);
+  await openSettings(page);
+
+  await page.evaluate(() => {
+    window.__desktopPanelMock.setRawImportContent("{not-json");
+  });
+  await page.click("#importDataButton");
+
+  await expect(page.locator(".tile .label")).toHaveText(["知乎", "腾讯视频"]);
+  await expect(page.locator("#issueCenter")).toBeVisible();
+  await expect(page.locator("#issueList")).toContainText("导入失败");
 });
 
 test("imports dropped shortcuts and enriches their icons in the background", async ({ page }) => {

@@ -3,8 +3,18 @@
 
   const state = {
     launchAtLogin: false,
+    globalShortcut: { enabled: false, shortcut: "" },
+    windowBehavior: {
+      autoHideEnabled: false,
+      snapEdge: "auto",
+      snapDistance: 14,
+      revealDelayMs: 250
+    },
     importResult: { canceled: true },
     exportResult: { canceled: false, filePath: "C:\\exports\\desktop-panel-backup.json" },
+    backupDirectoryResult: { canceled: false, directory: "C:\\backups" },
+    backupWriteError: "",
+    writtenBackups: [],
     officialUrls: {},
     iconSuggestions: {},
     droppedShortcutsByPath: {},
@@ -12,6 +22,9 @@
     nativeDragDropHandler: null,
     calls: {
       closeWindow: [],
+      configureGlobalShortcut: [],
+      configureWindowBehavior: [],
+      chooseBackupDirectory: [],
       exportStateFile: [],
       getLaunchAtLogin: [],
       importStateFile: [],
@@ -24,7 +37,9 @@
       setLaunchAtLogin: [],
       setSnapEnabled: [],
       setWindowSize: [],
-      snapAfterDrag: []
+      snapAfterDrag: [],
+      toggleWindow: [],
+      writeBackupFile: []
     }
   };
 
@@ -61,6 +76,25 @@
     },
     cancelImport() {
       state.importResult = { canceled: true };
+    },
+    setRawImportContent(content, filePath = "C:\\imports\\broken.json") {
+      state.importResult = {
+        canceled: false,
+        filePath,
+        content: String(content || "")
+      };
+    },
+    setBackupDirectory(directory) {
+      state.backupDirectoryResult = {
+        canceled: false,
+        directory: String(directory || "")
+      };
+    },
+    cancelBackupDirectory() {
+      state.backupDirectoryResult = { canceled: true };
+    },
+    failNextBackup(message = "backup failed") {
+      state.backupWriteError = String(message || "backup failed");
     }
   };
 
@@ -73,6 +107,32 @@
     closeWindow() {
       state.calls.closeWindow.push(true);
       return Promise.resolve();
+    },
+    toggleWindow() {
+      state.calls.toggleWindow.push(true);
+      return Promise.resolve();
+    },
+    configureGlobalShortcut(enabled, shortcut) {
+      state.globalShortcut = {
+        enabled: Boolean(enabled && shortcut),
+        shortcut: String(shortcut || "")
+      };
+      state.calls.configureGlobalShortcut.push({ ...state.globalShortcut });
+      return Promise.resolve({ ...state.globalShortcut });
+    },
+    configureWindowBehavior(options) {
+      state.windowBehavior = {
+        autoHideEnabled: Boolean(options?.autoHideEnabled),
+        snapEdge: String(options?.snapEdge || "auto"),
+        snapDistance: Number(options?.snapDistance || 14),
+        revealDelayMs: Number(options?.revealDelayMs || 250)
+      };
+      state.calls.configureWindowBehavior.push({ ...state.windowBehavior });
+      return Promise.resolve();
+    },
+    chooseBackupDirectory() {
+      state.calls.chooseBackupDirectory.push(true);
+      return Promise.resolve(state.backupDirectoryResult);
     },
     exportStateFile(content) {
       state.calls.exportStateFile.push(String(content || ""));
@@ -132,6 +192,23 @@
     setWindowSize(width, height) {
       state.calls.setWindowSize.push([width, height]);
       return Promise.resolve();
+    },
+    writeBackupFile(content, directory, retention) {
+      const call = {
+        content: String(content || ""),
+        directory: String(directory || ""),
+        retention: Number(retention || 0)
+      };
+      state.calls.writeBackupFile.push(call);
+      if (state.backupWriteError) {
+        const error = state.backupWriteError;
+        state.backupWriteError = "";
+        return Promise.reject(new Error(error));
+      }
+      const filePath = `${call.directory}\\desktop-panel-backup-${state.writtenBackups.length + 1}.json`;
+      const backup = { ...call, filePath };
+      state.writtenBackups.push(backup);
+      return Promise.resolve({ filePath });
     },
     snapAfterDrag() {
       state.calls.snapAfterDrag.push(true);

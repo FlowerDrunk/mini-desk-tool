@@ -130,6 +130,7 @@ export function registerDragDropFeature(app) {
       app.runtime.externalDragDepth = 0;
       clearAllDropTargets();
       app.showDragToast?.("快捷方式解析失败，请确认文件仍然存在");
+      app.reportIssue?.("快捷方式解析失败", "请确认拖入的文件仍然存在且可访问");
       return;
     }
 
@@ -137,6 +138,7 @@ export function registerDragDropFeature(app) {
       app.runtime.externalDragDepth = 0;
       clearAllDropTargets();
       app.showDragToast?.("没有识别到可添加的快捷方式");
+      app.reportIssue?.("未识别到可添加项目", "如果是桌面快捷方式，请在 Tauri 客户端中拖入");
       return;
     }
 
@@ -301,6 +303,7 @@ export function registerDragDropFeature(app) {
       } catch {
         app.runtime.externalDragDepth = 0;
         clearAllDropTargets();
+        app.reportIssue?.("拖拽导入失败", "请稍后重试或改用设置中的导入入口");
       }
     });
   }

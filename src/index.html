@@ -14,6 +14,12 @@
 
     <main class="workspace" id="workspace">
       <section class="quick-panel no-drag" aria-label="快捷查找">
+        <select id="searchEngineSelect" class="search-engine-select" aria-label="搜索引擎">
+          <option value="bing">Bing</option>
+          <option value="baidu">百度</option>
+          <option value="google">Google</option>
+          <option value="duckduckgo">DuckDuckGo</option>
+        </select>
         <input id="searchInput" class="search-input" type="search" placeholder="搜索名称、描述、网址或路径" autocomplete="off" />
         <button id="clearSearchButton" class="search-clear" type="button" aria-label="清空搜索" hidden>×</button>
       </section>
@@ -84,73 +90,207 @@
     <form method="dialog" id="settingsForm" class="dialog-form">
       <h2>软件设置</h2>
 
-      <label>
-        基础图标大小
-        <input id="iconSizeInput" name="iconSize" type="range" min="42" max="76" step="2" />
-      </label>
+      <section class="settings-section">
+        <h3>配置文件</h3>
 
-      <label>
-        窗口宽度
-        <input id="windowWidthInput" name="windowWidth" type="range" min="300" max="560" step="10" />
-      </label>
+        <label>
+          当前配置
+          <select id="profileSelect" name="profile"></select>
+        </label>
 
-      <label class="checkbox">
-        <input id="showAddTileInput" name="showAddTile" type="checkbox" />
-        显示“添加图标”按钮
-      </label>
+        <label>
+          配置名称
+          <input id="profileNameInput" name="profileName" type="text" maxlength="18" placeholder="例如：工作、个人、临时项目" />
+        </label>
 
-      <label class="checkbox">
-        <input id="showGroupTitleInput" name="showGroupTitle" type="checkbox" />
-        显示组名
-      </label>
+        <div class="settings-actions">
+          <button id="createProfileButton" type="button">复制新建</button>
+          <button id="renameProfileButton" type="button">重命名</button>
+        </div>
+        <p id="profileStatus" class="field-hint">切换配置会自动保存当前图标、分组和布局。</p>
+      </section>
 
-      <label class="checkbox">
-        <input id="showItemLabelInput" name="showItemLabel" type="checkbox" />
-        显示名称
-      </label>
+      <section class="settings-section">
+        <h3>外观与布局</h3>
 
-      <label class="checkbox">
-        <input id="showSearchInput" name="showSearch" type="checkbox" />
-        显示搜索框
-      </label>
+        <label>
+          布局预设
+          <select id="layoutPresetSelect" name="layoutPreset">
+            <option value="compact">紧凑</option>
+            <option value="standard">标准</option>
+            <option value="wide">宽屏</option>
+            <option value="custom">自定义</option>
+          </select>
+        </label>
 
-      <label class="checkbox">
-        <input id="showRecentInput" name="showRecent" type="checkbox" />
-        显示最近打开
-      </label>
+        <label>
+          主题
+          <select id="themeSelect" name="theme">
+            <option value="aurora">极光蓝</option>
+            <option value="graphite">石墨灰</option>
+            <option value="sand">暖沙金</option>
+          </select>
+        </label>
 
-      <label>
-        图标排列方向
-        <select id="layoutDirectionInput" name="layoutDirection">
-          <option value="ltr">从左到右</option>
-          <option value="rtl">从右到左</option>
-        </select>
-      </label>
+        <label>
+          面板透明度
+          <input id="panelOpacityInput" name="panelOpacity" type="range" min="58" max="96" step="2" />
+        </label>
+        <p id="appearanceHint" class="field-hint">当前主题会影响搜索框、工具条和图标选中高亮。</p>
 
-      <label>
-        每排数量
-        <input id="trackCountInput" name="trackCount" type="range" min="1" max="4" step="1" />
-      </label>
-      <p id="trackCountHint" class="field-hint">当前每排显示 3 个图标</p>
+        <label>
+          基础图标大小
+          <input id="iconSizeInput" name="iconSize" type="range" min="42" max="76" step="2" />
+        </label>
 
-      <label class="checkbox">
-        <input id="snapEdgeInput" name="snapEdge" type="checkbox" />
-        窗口边缘吸附
-      </label>
+        <label>
+          窗口宽度
+          <input id="windowWidthInput" name="windowWidth" type="range" min="300" max="560" step="10" />
+        </label>
 
-      <label class="checkbox">
-        <input id="launchAtLoginInput" name="launchAtLogin" type="checkbox" />
-        开机启动
-      </label>
+        <label>
+          图标排列方向
+          <select id="layoutDirectionInput" name="layoutDirection">
+            <option value="ltr">从左到右</option>
+            <option value="rtl">从右到左</option>
+          </select>
+        </label>
 
-      <div class="settings-actions">
-        <button id="importDesktopButton" type="button">导入桌面</button>
-        <button id="importStartMenuButton" type="button" hidden>导入开始菜单</button>
-        <button id="exportDataButton" type="button">导出数据</button>
-        <button id="importDataButton" type="button">导入数据</button>
-        <button id="autoGroupButton" type="button">自动分组</button>
-        <button id="closeWindow" type="button">关闭窗口</button>
-      </div>
+        <label>
+          每排数量
+          <input id="trackCountInput" name="trackCount" type="range" min="1" max="4" step="1" />
+        </label>
+        <p id="trackCountHint" class="field-hint">当前每排显示 3 个图标</p>
+      </section>
+
+      <section class="settings-section">
+        <h3>显示与搜索</h3>
+
+        <label class="checkbox">
+          <input id="showAddTileInput" name="showAddTile" type="checkbox" />
+          显示“添加图标”按钮
+        </label>
+
+        <label class="checkbox">
+          <input id="showGroupTitleInput" name="showGroupTitle" type="checkbox" />
+          显示组名
+        </label>
+
+        <label class="checkbox">
+          <input id="showItemLabelInput" name="showItemLabel" type="checkbox" />
+          显示名称
+        </label>
+
+        <label class="checkbox">
+          <input id="showSearchInput" name="showSearch" type="checkbox" />
+          显示搜索框
+        </label>
+
+        <label class="checkbox">
+          <input id="showRecentInput" name="showRecent" type="checkbox" />
+          显示最近打开
+        </label>
+
+        <label>
+          默认搜索引擎
+          <select id="settingsSearchEngineSelect" name="searchEngine">
+            <option value="bing">Bing</option>
+            <option value="baidu">百度</option>
+            <option value="google">Google</option>
+            <option value="duckduckgo">DuckDuckGo</option>
+          </select>
+        </label>
+        <p id="searchEngineHint" class="field-hint">搜索框中按 Enter 会调用当前搜索引擎。</p>
+      </section>
+
+      <section class="settings-section">
+        <h3>窗口行为</h3>
+
+        <label class="checkbox">
+          <input id="snapEdgeInput" name="snapEdge" type="checkbox" />
+          窗口边缘吸附
+        </label>
+
+        <label class="checkbox">
+          <input id="launchAtLoginInput" name="launchAtLogin" type="checkbox" />
+          开机启动
+        </label>
+
+        <label class="checkbox">
+          <input id="autoHideOnBlurInput" name="autoHideOnBlur" type="checkbox" />
+          失焦自动隐藏
+        </label>
+        <p class="field-hint">实验功能：切换到其他窗口时隐藏面板，可用托盘或快捷键唤回。</p>
+
+        <label>
+          吸附边缘
+          <select id="snapEdgeSelect" name="snapEdge">
+            <option value="auto">自动</option>
+            <option value="left">左侧</option>
+            <option value="right">右侧</option>
+            <option value="top">顶部</option>
+            <option value="bottom">底部</option>
+          </select>
+        </label>
+
+        <label>
+          吸附距离
+          <input id="snapDistanceInput" name="snapDistance" type="range" min="4" max="64" step="2" />
+        </label>
+        <p id="snapDistanceHint" class="field-hint">当前吸附距离 14 px。</p>
+
+        <label>
+          唤出延迟
+          <input id="revealDelayInput" name="revealDelay" type="range" min="0" max="1500" step="50" />
+        </label>
+        <p id="revealDelayHint" class="field-hint">当前唤出延迟 250 ms。</p>
+
+        <label class="checkbox">
+          <input id="globalShortcutEnabledInput" name="globalShortcutEnabled" type="checkbox" />
+          全局快捷键
+        </label>
+
+        <label>
+          快捷键
+          <input id="globalShortcutInput" name="globalShortcut" type="text" maxlength="40" placeholder="CommandOrControl+Alt+Space" />
+        </label>
+        <p id="globalShortcutStatus" class="field-hint">默认：Ctrl+Alt+Space 显示或隐藏面板。</p>
+      </section>
+
+      <section class="settings-section">
+        <h3>备份与恢复</h3>
+
+        <label class="checkbox">
+          <input id="autoBackupEnabledInput" name="autoBackupEnabled" type="checkbox" />
+          自动备份
+        </label>
+
+        <label>
+          保留备份数量
+          <input id="backupRetentionInput" name="backupRetention" type="range" min="1" max="12" step="1" />
+        </label>
+        <p id="backupStatus" class="field-hint">尚未配置备份目录。</p>
+
+        <div class="settings-actions">
+          <button id="chooseBackupDirectoryButton" type="button">选择目录</button>
+          <button id="backupNowButton" type="button">立即备份</button>
+          <button id="restorePointButton" type="button">恢复导入前</button>
+          <button id="clearIssuesButton" type="button">清空提示</button>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h3>数据与整理</h3>
+
+        <div class="settings-actions">
+          <button id="importDesktopButton" type="button">导入桌面</button>
+          <button id="importStartMenuButton" type="button" hidden>导入开始菜单</button>
+          <button id="exportDataButton" type="button">导出数据</button>
+          <button id="importDataButton" type="button">导入数据</button>
+          <button id="autoGroupButton" type="button">自动分组</button>
+          <button id="closeWindow" type="button">关闭窗口</button>
+        </div>
+      </section>
 
       <menu>
         <button value="cancel" type="button" id="cancelSettingsDialog">关闭</button>
@@ -232,6 +372,13 @@
   </div>
 
   <div id="dragToast" class="drag-toast" hidden></div>
+  <section id="issueCenter" class="issue-center" hidden>
+    <div class="issue-head">
+      <strong>提示中心</strong>
+      <button id="dismissIssueCenter" type="button" aria-label="关闭提示中心">×</button>
+    </div>
+    <div id="issueList" class="issue-list"></div>
+  </section>
 
   <div id="itemContextMenu" class="context-menu" hidden>
     <button type="button" data-action="edit-item"><span>编辑图标</span></button>

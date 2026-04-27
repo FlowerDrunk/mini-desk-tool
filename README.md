@@ -21,15 +21,48 @@ Mini Desk Tool is a lightweight Tauri desktop panel for Windows. It stays attach
 - Original icon fallback for website links and imported Windows shortcuts.
 - Automatic grouping based on title, description, and hostname.
 - Launch at login option in the settings dialog.
+- Window behavior settings for auto-hide, edge reveal, snap edge, snap distance, reveal delay, and a global show/hide shortcut.
+- Backup and recovery settings with manual backups, automatic backups, import restore points, and an issue center.
+- Personalization settings for profiles, layout presets, themes, and panel transparency.
+- Search bar engine selector with Enter-to-search support.
 
-## v1.3.0
+## v1.2.0
+
+- Added profile switching for different icon/group/layout scenarios.
+- Added "copy current as new profile" and profile renaming in settings.
+- Added Compact, Standard, Wide, and Custom layout presets.
+- Added more visible theme selection and panel transparency control.
+- Added search engine selection in the search bar and settings.
+- Reorganized settings into profile, appearance/layout, display/search, window behavior, backup, and data sections.
+- Kept machine-level settings such as backup directory, window behavior, and global shortcut outside profiles.
+- Improved the search engine dropdown, search clear button, and recent-opened icon sizing.
+- Updated the optimization roadmap so completed work maps to v1.1.2-v1.1.6 and future plans start at v1.2.1.
+
+## v1.1.6
+
+- Added a Backup & Recovery section in settings.
+- Added backup directory selection, backup retention, and manual backup.
+- Added delayed automatic backups after data changes when backup is enabled.
+- Added import-time restore points and a restore-before-import action.
+- Added an issue center for import, export, backup, and recovery failures.
+
+## v1.1.5
+
+- Added a Window Behavior section in settings.
+- Added an experimental blur auto-hide option.
+- Added edge reveal after auto-hide with monitor-aware work-area detection.
+- Added snap edge, snap distance, and reveal delay settings.
+- Added a configurable global show/hide shortcut powered by Tauri's global shortcut plugin.
+- Added clear shortcut registration status when registration fails or is disabled.
+
+## v1.1.4
 
 - Added bulk import from Desktop and Start Menu shortcuts.
 - Added multi-select for launcher items.
 - Added batch move, resize, delete, and clear-selection actions.
 - Added native shortcut location scanning in the Tauri backend.
 
-## v1.2.0
+## v1.1.3
 
 - Added a top search box for filtering by title, description, URL, path, and group name.
 - Added recent opened items so frequently used entries resurface automatically.

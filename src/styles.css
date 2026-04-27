@@ -11,6 +11,17 @@
   --scrollbar-track: rgba(255, 255, 255, 0.08);
   --scrollbar-thumb: linear-gradient(180deg, rgba(171, 228, 255, 0.72), rgba(89, 169, 255, 0.78));
   --scrollbar-thumb-hover: linear-gradient(180deg, rgba(202, 240, 255, 0.9), rgba(112, 185, 255, 0.96));
+  --panel-alpha: 0.78;
+  --panel-alpha-soft: 0.48;
+  --panel-alpha-strong: 0.86;
+  --panel-bg-glow: 0.13;
+  --panel-bg-wash: 0.1;
+  --tile-alpha: 0.16;
+  --theme-accent: #75ffd9;
+  --theme-accent-2: #59acff;
+  --theme-accent-rgb: 117, 255, 217;
+  --theme-accent-2-rgb: 89, 172, 255;
+  --theme-surface-rgb: 17, 21, 27;
 }
 
 * {
@@ -92,6 +103,10 @@ dialog {
   overflow-x: hidden;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(var(--theme-accent-rgb), var(--panel-bg-glow)), transparent 36%),
+    radial-gradient(circle at 100% 12%, rgba(var(--theme-accent-2-rgb), calc(var(--panel-bg-glow) * 0.78)), transparent 34%),
+    linear-gradient(180deg, rgba(var(--theme-surface-rgb), var(--panel-bg-wash)), rgba(var(--theme-surface-rgb), calc(var(--panel-bg-wash) * 0.18)));
 }
 
 .workspace::-webkit-scrollbar {
@@ -114,15 +129,15 @@ dialog {
   top: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   margin: -4px 4px 10px;
   padding: 6px;
   border-radius: 16px;
-  background: rgba(17, 21, 27, 0.42);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+  background: rgba(var(--theme-surface-rgb), var(--panel-alpha-soft));
+  border: 1px solid rgba(var(--theme-accent-rgb), 0.24);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(var(--theme-accent-rgb), 0.14);
   backdrop-filter: blur(14px) saturate(130%);
 }
 
@@ -140,8 +155,8 @@ dialog {
   margin: -2px 4px 10px;
   padding: 8px;
   border-radius: 16px;
-  background: rgba(27, 34, 41, 0.76);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(var(--theme-surface-rgb), var(--panel-alpha-strong));
+  border: 1px solid rgba(var(--theme-accent-rgb), 0.22);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
   backdrop-filter: blur(14px) saturate(130%);
 }
@@ -180,7 +195,46 @@ dialog {
 }
 
 .batch-toolbar button:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(var(--theme-accent-rgb), 0.22);
+}
+
+.search-engine-select {
+  width: 98px;
+  height: 30px;
+  min-width: 0;
+  border: 1px solid rgba(var(--theme-accent-rgb), 0.26);
+  border-radius: 11px;
+  padding: 0 28px 0 10px;
+  color: #f8fbff;
+  background:
+    linear-gradient(45deg, transparent 50%, rgba(248, 251, 255, 0.95) 50%) calc(100% - 16px) 12px / 6px 6px no-repeat,
+    linear-gradient(135deg, rgba(248, 251, 255, 0.95) 50%, transparent 50%) calc(100% - 12px) 12px / 6px 6px no-repeat,
+    linear-gradient(180deg, rgba(var(--theme-accent-rgb), 0.28), rgba(var(--theme-accent-2-rgb), 0.14));
+  outline: 0;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  appearance: none;
+}
+
+.search-engine-select:hover {
+  border-color: rgba(var(--theme-accent-rgb), 0.44);
+  background-color: rgba(var(--theme-accent-rgb), 0.2);
+}
+
+.search-engine-select:focus {
+  box-shadow: inset 0 0 0 1px rgba(var(--theme-accent-rgb), 0.5), 0 0 0 3px rgba(var(--theme-accent-2-rgb), 0.14);
+}
+
+.search-engine-select option {
+  color: #10202c;
+  background: #f4fbf8;
+  font-weight: 700;
+}
+
+.search-engine-select option:checked {
+  color: #fff;
+  background: #526e68;
 }
 
 .search-input {
@@ -194,6 +248,15 @@ dialog {
   background: rgba(255, 255, 255, 0.12);
   outline: 0;
   font-size: 12px;
+  appearance: none;
+}
+
+.search-input::-webkit-search-decoration,
+.search-input::-webkit-search-cancel-button,
+.search-input::-webkit-search-results-button,
+.search-input::-webkit-search-results-decoration {
+  display: none;
+  appearance: none;
 }
 
 .search-input::placeholder {
@@ -201,7 +264,7 @@ dialog {
 }
 
 .search-input:focus {
-  box-shadow: inset 0 0 0 1px rgba(153, 215, 255, 0.62), 0 0 0 3px rgba(72, 174, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(var(--theme-accent-rgb), 0.72), 0 0 0 3px rgba(var(--theme-accent-2-rgb), 0.14);
 }
 
 .search-clear {
@@ -215,7 +278,7 @@ dialog {
 }
 
 .search-clear:hover {
-  background: rgba(255, 255, 255, 0.24);
+  background: rgba(var(--theme-accent-rgb), 0.22);
 }
 
 .groups {
@@ -321,8 +384,8 @@ dialog {
 }
 
 .tile.is-selected .icon-wrap {
-  border-color: rgba(117, 255, 217, 0.88);
-  box-shadow: 0 0 0 3px rgba(117, 255, 217, 0.16), 0 8px 18px rgba(0, 0, 0, 0.28);
+  border-color: var(--theme-accent);
+  box-shadow: 0 0 0 3px rgba(var(--theme-accent-rgb), 0.18), 0 8px 18px rgba(0, 0, 0, 0.28);
 }
 
 .select-toggle {
@@ -352,7 +415,7 @@ dialog {
 }
 
 .tile.is-selected .select-toggle {
-  background: #75ffd9;
+  background: var(--theme-accent);
 }
 
 .group-title-name {
@@ -390,7 +453,7 @@ dialog {
 }
 
 .recent-group {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(128, 220, 191, 0.08));
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(var(--theme-accent-rgb), 0.12));
 }
 
 .recent-pager {
@@ -449,8 +512,8 @@ dialog {
   right: -4px;
   height: 4px;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(117, 255, 217, 0.96), rgba(89, 172, 255, 0.98));
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18), 0 0 16px rgba(74, 183, 255, 0.42);
+  background: linear-gradient(90deg, var(--theme-accent), var(--theme-accent-2));
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18), 0 0 16px rgba(var(--theme-accent-2-rgb), 0.42);
 }
 
 .tile.drop-before::before {
@@ -506,14 +569,14 @@ dialog {
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
   background-image:
     var(--item-icon-image, none),
-    radial-gradient(circle at 28% 22%, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.06) 52%, rgba(170, 192, 216, 0.04) 100%),
-    linear-gradient(180deg, rgba(236, 242, 250, 0.22), rgba(205, 217, 232, 0.12));
+    radial-gradient(circle at 28% 22%, rgba(255, 255, 255, calc(var(--tile-alpha) + 0.06)), rgba(255, 255, 255, calc(var(--tile-alpha) * 0.42)) 52%, rgba(170, 192, 216, calc(var(--tile-alpha) * 0.28)) 100%),
+    linear-gradient(180deg, rgba(236, 242, 250, var(--tile-alpha)), rgba(205, 217, 232, calc(var(--tile-alpha) * 0.62)));
   background-repeat: no-repeat, no-repeat, no-repeat;
   background-position: center, center, center;
   background-size: contain, cover, cover;
   background-origin: content-box, border-box, border-box;
   background-clip: content-box, border-box, border-box;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, calc(var(--tile-alpha) * 0.78));
 }
 
 .add-tile .icon-wrap {
@@ -598,8 +661,8 @@ dialog {
 .group-grid.drop-empty {
   min-height: var(--tile-base-size);
   border-radius: 14px;
-  outline: 1px dashed rgba(117, 255, 217, 0.74);
-  background: rgba(117, 255, 217, 0.08);
+  outline: 1px dashed rgba(var(--theme-accent-rgb), 0.74);
+  background: rgba(var(--theme-accent-rgb), 0.08);
 }
 
 .context-menu {
@@ -641,7 +704,7 @@ dialog {
 }
 
 .context-menu .menu-accent {
-  background: linear-gradient(135deg, rgba(255, 113, 141, 0.2), rgba(81, 189, 255, 0.22));
+  background: linear-gradient(135deg, rgba(var(--theme-accent-rgb), 0.2), rgba(var(--theme-accent-2-rgb), 0.22));
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
@@ -673,6 +736,69 @@ dialog {
 .drag-toast.is-visible {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}
+
+.issue-center {
+  position: fixed;
+  left: 14px;
+  right: 14px;
+  bottom: 18px;
+  z-index: 1190;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 214, 153, 0.28);
+  border-radius: 16px;
+  background: rgba(31, 27, 22, 0.88);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(16px) saturate(132%);
+}
+
+.issue-center[hidden] {
+  display: none !important;
+}
+
+.issue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #fff2db;
+  font-size: 12px;
+}
+
+.issue-head button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff5e8;
+  background: rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+}
+
+.issue-list {
+  display: grid;
+  gap: 6px;
+}
+
+.issue-item {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.issue-item strong {
+  color: #fff8ef;
+  font-size: 12px;
+}
+
+.issue-item span {
+  color: rgba(255, 237, 211, 0.72);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .context-menu button.danger {
@@ -892,6 +1018,21 @@ select:focus {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
+}
+
+.settings-section {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(98, 124, 146, 0.16);
+  border-radius: 14px;
+  background: rgba(242, 247, 252, 0.66);
+}
+
+.settings-section h3 {
+  margin: 0;
+  color: #314758;
+  font-size: 13px;
 }
 
 .settings-actions button {
