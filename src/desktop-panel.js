@@ -13,6 +13,15 @@ export async function ensureDesktopPanelBridge() {
 
   const appWindow = windowApi.getCurrentWindow();
   let registeredGlobalShortcut = "";
+  let nativeDragScaleFactor = Number(window.devicePixelRatio) || 1;
+  const refreshNativeDragScaleFactor = async () => {
+    try {
+      nativeDragScaleFactor = Number(await appWindow.scaleFactor()) || nativeDragScaleFactor;
+    } catch {
+      nativeDragScaleFactor = Number(window.devicePixelRatio) || nativeDragScaleFactor;
+    }
+  };
+  void refreshNativeDragScaleFactor();
 
   window.desktopPanel = {
     minimizeWindow: () => appWindow.minimize(),
@@ -58,7 +67,16 @@ export async function ensureDesktopPanelBridge() {
       return { enabled: true, shortcut: normalizedShortcut };
     },
     startWindowDrag: () => appWindow.startDragging(),
-    onNativeDragDrop: async (handler) => appWindow.onDragDropEvent((event) => handler(event.payload))
+    onNativeDragDrop: async (handler) => appWindow.onDragDropEvent((event) => {
+      const payload = event.payload;
+      if (!payload || !payload.position) {
+        handler(payload);
+        return;
+      }
+
+      void refreshNativeDragScaleFactor();
+      handler({ ...payload, scaleFactor: nativeDragScaleFactor });
+    })
   };
 
   return window.desktopPanel;

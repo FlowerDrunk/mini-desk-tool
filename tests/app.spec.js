@@ -66,6 +66,16 @@ async function openSettings(page) {
   await expect.poll(async () => page.locator("#settingsDialog").evaluate((node) => node.open)).toBe(true);
 }
 
+async function longPressTile(page, selector) {
+  const tile = page.locator(selector);
+  const box = await tile.boundingBox();
+  if (!box) throw new Error(`Unable to resolve tile ${selector} bounding box`);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(620);
+  await page.mouse.up();
+}
+
 async function setRangeValue(page, selector, value) {
   await page.locator(selector).evaluate((input, nextValue) => {
     input.value = String(nextValue);
@@ -322,8 +332,9 @@ test("batch moves, resizes, and deletes selected items", async ({ page }) => {
     ]
   });
 
-  await page.locator('.tile[data-item-id="alpha-item"] .select-toggle').click();
-  await page.locator('.tile[data-item-id="beta-item"] .select-toggle').click();
+  await longPressTile(page, '.tile[data-item-id="alpha-item"]');
+  await expect(page.locator("#appShell")).toHaveAttribute("data-selection-mode", "true");
+  await page.locator('.tile[data-item-id="beta-item"]').click();
   await expect(page.locator("#batchToolbar")).toBeVisible();
   await expect(page.locator("#batchCount")).toHaveText("已选择 2 项");
 
@@ -334,7 +345,7 @@ test("batch moves, resizes, and deletes selected items", async ({ page }) => {
     return state.groups.find((group) => group.id === "tools-group").items.map((item) => item.title);
   }).toEqual(["Gamma", "Alpha", "Beta"]);
 
-  await page.locator('.tile[data-item-id="alpha-item"] .select-toggle').click();
+  await longPressTile(page, '.tile[data-item-id="alpha-item"]');
   await page.selectOption("#batchSizeSelect", "2x2");
   await page.click("#batchResizeButton");
   await expect.poll(async () => {
@@ -464,6 +475,53 @@ test("updates settings and calls desktop integration hooks", async ({ page }) =>
   });
 });
 
+test("navigates settings sections with the floating icon rail", async ({ page }) => {
+  await gotoApp(page);
+  await openSettings(page);
+
+  await expect(page.locator("#settingsNav")).toBeVisible();
+  const appearanceLabel = page.locator('.settings-nav-button[data-target-section="appearance"] .settings-nav-label');
+  await expect(appearanceLabel).toHaveCSS("opacity", "0");
+  await page.locator('.settings-nav-button[data-target-section="appearance"]').hover();
+  await expect(appearanceLabel).toHaveCSS("opacity", "1");
+
+  await page.locator('.settings-nav-button[data-target-section="window"]').click();
+  await expect(page.locator('.settings-nav-button[data-target-section="window"]')).toHaveClass(/is-active/);
+  await expect(page.locator('[data-settings-section="window"]')).toHaveClass(/is-jump-target/);
+  await expect.poll(() => page.evaluate(() => document.activeElement?.dataset?.settingsSection)).toBe("window");
+  await expect.poll(() => page.evaluate(() => {
+    const section = document.querySelector('[data-settings-section="window"]');
+    const form = document.querySelector("#settingsForm");
+    const sectionRect = section.getBoundingClientRect();
+    const formRect = form.getBoundingClientRect();
+    return sectionRect.top >= formRect.top && sectionRect.top < formRect.bottom;
+  })).toBe(true);
+});
+
+test("closes menus and dialogs with Escape", async ({ page }) => {
+  await gotoApp(page);
+
+  await openAppContextMenu(page);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#appContextMenu")).toBeHidden();
+
+  await openAppContextMenu(page);
+  await page.locator('#appContextMenu [data-action="add-icon"]').click();
+  await expect.poll(async () => page.locator("#addDialog").evaluate((node) => node.open)).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect.poll(async () => page.locator("#addDialog").evaluate((node) => node.open)).toBe(false);
+
+  await openItemContextMenu(page, 0);
+  await page.locator('#itemContextMenu [data-action="edit-item"]').click();
+  await expect.poll(async () => page.locator("#editDialog").evaluate((node) => node.open)).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect.poll(async () => page.locator("#editDialog").evaluate((node) => node.open)).toBe(false);
+
+  await openSettings(page);
+  await page.keyboard.press("Escape");
+  await expect.poll(async () => page.locator("#settingsDialog").evaluate((node) => node.open)).toBe(false);
+});
+
 test("configures window behavior settings", async ({ page }) => {
   await gotoApp(page);
   await openSettings(page);
@@ -488,8 +546,8 @@ test("configures window behavior settings", async ({ page }) => {
   });
   await expect(page.locator("#globalShortcutStatus")).toContainText("已启用");
 
-  await page.fill("#globalShortcutInput", "CommandOrControl+Shift+M");
-  await page.locator("#globalShortcutInput").dispatchEvent("change");
+  await page.locator("#globalShortcutInput").focus();
+  await page.keyboard.press("Control+Shift+M");
   await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.configureGlobalShortcut.at(-1))).toEqual({
     enabled: true,
     shortcut: "CommandOrControl+Shift+M"
@@ -506,6 +564,26 @@ test("configures window behavior settings", async ({ page }) => {
   expect(state.app.revealDelay).toBe(400);
   expect(state.app.globalShortcutEnabled).toBe(true);
   expect(state.app.globalShortcut).toBe("CommandOrControl+Shift+M");
+});
+
+test("records global shortcuts from keyboard input", async ({ page }) => {
+  await gotoApp(page);
+  await openSettings(page);
+
+  await page.check("#globalShortcutEnabledInput");
+  await page.locator("#globalShortcutInput").focus();
+  await page.keyboard.press("Control+Alt+KeyK");
+
+  await expect(page.locator("#globalShortcutInput")).toHaveValue("CommandOrControl+Alt+K");
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.configureGlobalShortcut.at(-1))).toEqual({
+    enabled: true,
+    shortcut: "CommandOrControl+Alt+K"
+  });
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#globalShortcutInput")).toHaveValue("CommandOrControl+Alt+Space");
+  await page.keyboard.press("Escape");
+  await expect.poll(async () => page.locator("#settingsDialog").evaluate((node) => node.open)).toBe(false);
 });
 
 test("applies layout presets and appearance settings", async ({ page }) => {
@@ -536,16 +614,29 @@ test("applies layout presets and appearance settings", async ({ page }) => {
 
   await page.selectOption("#themeSelect", "sand");
   await setRangeValue(page, "#panelOpacityInput", 88);
+  await page.selectOption("#fontFamilySelect", "mono");
+  await page.locator("#textColorInput").evaluate((input) => {
+    input.value = "#ffe7a3";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
   await expect(page.locator("#appearanceHint")).toContainText("暖沙金");
   await expect.poll(() => page.evaluate(() => ({
     theme: document.querySelector("#appShell").dataset.theme,
     accent: getComputedStyle(document.documentElement).getPropertyValue("--theme-accent").trim(),
     surface: getComputedStyle(document.documentElement).getPropertyValue("--theme-surface-rgb").trim(),
+    font: getComputedStyle(document.documentElement).getPropertyValue("--app-font-family").trim(),
+    textColor: getComputedStyle(document.documentElement).getPropertyValue("--text-color").trim(),
+    searchColor: getComputedStyle(document.querySelector("#searchInput")).color,
+    settingsTitleColor: getComputedStyle(document.querySelector("#settingsDialog h2")).color,
     alpha: getComputedStyle(document.documentElement).getPropertyValue("--panel-alpha").trim()
   }))).toEqual({
     theme: "sand",
     accent: "#ffd27a",
     surface: "34, 27, 20",
+    font: "\"Cascadia Mono\", \"Consolas\", monospace",
+    textColor: "#ffe7a3",
+    searchColor: "rgb(255, 231, 163)",
+    settingsTitleColor: "rgb(255, 231, 163)",
     alpha: "0.88"
   });
   const transparencyVars = await page.evaluate(() => {
@@ -563,8 +654,53 @@ test("applies layout presets and appearance settings", async ({ page }) => {
   const state = await getStoredState(page);
   expect(state.layout.layoutPreset).toBe("compact");
   expect(state.layout.theme).toBe("sand");
+  expect(state.layout.fontFamily).toBe("mono");
+  expect(state.layout.textColor).toBe("#ffe7a3");
   expect(state.layout.panelOpacity).toBe(88);
   expect(state.layout.searchEngine).toBe("bing");
+});
+
+test("supports custom appearance themes", async ({ page }) => {
+  await gotoApp(page);
+  await openSettings(page);
+
+  await page.selectOption("#themeSelect", "custom");
+  await expect(page.locator("#customThemeFields")).toBeVisible();
+  await page.fill("#customThemeNameInput", "Ocean");
+  await page.locator("#customThemeAccentInput").evaluate((input) => {
+    input.value = "#12c7b8";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await page.locator("#customThemeAccent2Input").evaluate((input) => {
+    input.value = "#3d6cff";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await page.locator("#customThemeSurfaceInput").evaluate((input) => {
+    input.value = "#101820";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+
+  await expect(page.locator("#appearanceHint")).toContainText("Ocean");
+  await expect.poll(() => page.evaluate(() => ({
+    theme: document.querySelector("#appShell").dataset.theme,
+    accent: getComputedStyle(document.documentElement).getPropertyValue("--theme-accent").trim(),
+    accent2: getComputedStyle(document.documentElement).getPropertyValue("--theme-accent-2").trim(),
+    surface: getComputedStyle(document.documentElement).getPropertyValue("--theme-surface-rgb").trim()
+  }))).toEqual({
+    theme: "custom",
+    accent: "#12c7b8",
+    accent2: "#3d6cff",
+    surface: "16, 24, 32"
+  });
+
+  const state = await getStoredState(page);
+  expect(state.layout.theme).toBe("custom");
+  expect(state.layout.customTheme).toEqual({
+    label: "Ocean",
+    accent: "#12c7b8",
+    accent2: "#3d6cff",
+    surface: "#101820"
+  });
 });
 
 test("changes the default search engine from settings", async ({ page }) => {
@@ -943,6 +1079,137 @@ test("imports native desktop drag drop payloads from tauri", async ({ page }) =>
 
   await expect(page.locator(".tile .label")).toContainText(["Native Tool"]);
   await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.resolveDroppedPaths)).toHaveLength(1);
+});
+
+test("drops native desktop shortcuts into the hovered group", async ({ page }) => {
+  await gotoAppWithState(page, {
+    layout: {
+      iconSize: 58,
+      windowWidth: 360,
+      showGroupTitle: true,
+      showAddTile: false,
+      showSearch: true,
+      flowDirection: "ltr",
+      trackCount: 3
+    },
+    ui: {
+      collapsedGroupIds: [],
+      recentItemIds: []
+    },
+    app: { snapToEdge: true },
+    groups: [
+      {
+        id: "default-group",
+        name: "Default",
+        items: [
+          { id: "alpha-item", title: "Alpha", description: "", url: "https://alpha.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      },
+      {
+        id: "tools-group",
+        name: "Tools",
+        items: [
+          { id: "beta-item", title: "Beta", description: "", url: "https://beta.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+
+  await page.evaluate((shortcutPath) => {
+    window.__desktopPanelMock.setDroppedShortcut(shortcutPath, {
+      title: "Hovered Tool",
+      url: "https://example.com/hovered",
+      shortcutIcon: ""
+    });
+
+    const title = document.querySelector('.group[data-group-id="tools-group"] .group-title');
+    const rect = title.getBoundingClientRect();
+    window.__desktopPanelMock.emitNativeDragDrop({
+      type: "over",
+      paths: [shortcutPath],
+      position: {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2
+      }
+    });
+  }, "C:\\\\Links\\\\Hovered Tool.lnk");
+
+  await expect(page.locator('.group[data-group-id="tools-group"]')).toHaveClass(/group-drop-target/);
+
+  await page.evaluate((shortcutPath) => {
+    const title = document.querySelector('.group[data-group-id="tools-group"] .group-title');
+    const rect = title.getBoundingClientRect();
+    window.__desktopPanelMock.emitNativeDragDrop({
+      type: "drop",
+      paths: [shortcutPath],
+      position: {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2
+      }
+    });
+  }, "C:\\\\Links\\\\Hovered Tool.lnk");
+
+  await expect(page.locator('.group[data-group-id="tools-group"] .tile .label')).toHaveText(["Hovered Tool", "Beta"]);
+  await expect(page.locator('.group[data-group-id="default-group"] .tile .label')).toHaveText(["Alpha"]);
+});
+
+test("normalizes native physical drag coordinates before resolving the hovered group", async ({ page }) => {
+  await gotoAppWithState(page, {
+    layout: {
+      iconSize: 58,
+      windowWidth: 360,
+      showGroupTitle: true,
+      showAddTile: false,
+      showSearch: true,
+      flowDirection: "ltr",
+      trackCount: 3
+    },
+    ui: {
+      collapsedGroupIds: [],
+      recentItemIds: []
+    },
+    app: { snapToEdge: true },
+    groups: [
+      {
+        id: "default-group",
+        name: "Default",
+        items: [
+          { id: "alpha-item", title: "Alpha", description: "", url: "https://alpha.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      },
+      {
+        id: "tools-group",
+        name: "Tools",
+        items: [
+          { id: "beta-item", title: "Beta", description: "", url: "https://beta.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+
+  await page.evaluate((shortcutPath) => {
+    window.__desktopPanelMock.setDroppedShortcut(shortcutPath, {
+      title: "Scaled Tool",
+      url: "https://example.com/scaled",
+      shortcutIcon: ""
+    });
+
+    const title = document.querySelector('.group[data-group-id="tools-group"] .group-title');
+    const rect = title.getBoundingClientRect();
+    const scaleFactor = 2;
+    window.__desktopPanelMock.emitNativeDragDrop({
+      type: "drop",
+      paths: [shortcutPath],
+      scaleFactor,
+      position: {
+        x: (rect.left + rect.width / 2) * scaleFactor,
+        y: (rect.top + rect.height / 2) * scaleFactor
+      }
+    });
+  }, "C:\\\\Links\\\\Scaled Tool.lnk");
+
+  await expect(page.locator('.group[data-group-id="tools-group"] .tile .label')).toHaveText(["Scaled Tool", "Beta"]);
+  await expect(page.locator('.group[data-group-id="default-group"] .tile .label')).toHaveText(["Alpha"]);
 });
 
 test("clears drop state and shows a hint when dropped shortcuts cannot be resolved", async ({ page }) => {

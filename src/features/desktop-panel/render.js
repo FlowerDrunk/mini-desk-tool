@@ -3,7 +3,8 @@ import {
   DEFAULT_GAP,
   ensureValidGroups,
   escapeHtml,
-  THEME_OPTIONS,
+  getFontConfig,
+  getThemeConfig,
   SEARCH_ENGINES,
   makeFallbackIcon,
   safeHost,
@@ -46,7 +47,8 @@ export function registerRenderFeature(app) {
     document.documentElement.style.setProperty("--gap", `${DEFAULT_GAP}px`);
     document.documentElement.style.setProperty("--tile-base-size", `${tileBase}px`);
     document.documentElement.style.setProperty("--track-count", String(trackCount));
-    const theme = THEME_OPTIONS[app.store.state.layout.theme] || THEME_OPTIONS.aurora;
+    const theme = getThemeConfig(app.store.state.layout);
+    const font = getFontConfig(app.store.state.layout);
     const opacity = clampNumber(app.store.state.layout.panelOpacity, 58, 96, 78) / 100;
     const normalizedOpacity = (opacity - 0.58) / (0.96 - 0.58);
     document.documentElement.style.setProperty("--panel-alpha", String(opacity));
@@ -60,6 +62,8 @@ export function registerRenderFeature(app) {
     document.documentElement.style.setProperty("--theme-accent-rgb", theme.accentRgb);
     document.documentElement.style.setProperty("--theme-accent-2-rgb", theme.accent2Rgb);
     document.documentElement.style.setProperty("--theme-surface-rgb", theme.surface);
+    document.documentElement.style.setProperty("--app-font-family", font.value);
+    document.documentElement.style.setProperty("--text-color", app.store.state.layout.textColor || "#ffffff");
     app.refs.appShell.dataset.flow = app.store.state.layout.flowDirection === "rtl" ? "rtl" : "ltr";
     app.refs.appShell.dataset.showLabels = app.store.state.layout.showItemLabel === false ? "false" : "true";
     app.refs.appShell.dataset.theme = app.store.state.layout.theme || "aurora";
@@ -83,6 +87,7 @@ export function registerRenderFeature(app) {
     if (!app.store.state.layout.showSearch) app.runtime.searchQuery = "";
     app.refs.groupsContainer.innerHTML = "";
     app.clearDropIndicator();
+    app.refs.appShell.dataset.selectionMode = app.runtime.selectionMode ? "true" : "false";
     syncSearchControls();
     syncBatchToolbar();
 
@@ -210,6 +215,7 @@ export function registerRenderFeature(app) {
     node.dataset.size = SIZE_META[sizeKey] ? sizeKey : "1x1";
     node.dataset.recentOnly = recentOnly ? "true" : "false";
     node.classList.toggle("is-selected", app.runtime.selectedItemIds.has(item.id));
+    node.classList.toggle("is-selection-mode", app.runtime.selectionMode && !recentOnly);
 
     const iconWrap = node.querySelector(".icon-wrap");
     const label = node.querySelector(".label");
@@ -255,8 +261,14 @@ export function registerRenderFeature(app) {
         return;
       }
       if (event.target === deleteButton) return;
+      if (app.runtime.selectionMode && !recentOnly) {
+        event.preventDefault();
+        toggleItemSelection(item.id);
+        return;
+      }
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
+        app.runtime.selectionMode = true;
         toggleItemSelection(item.id);
         return;
       }
@@ -266,6 +278,7 @@ export function registerRenderFeature(app) {
     selectButton.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      app.runtime.selectionMode = true;
       toggleItemSelection(item.id);
     });
 
@@ -280,8 +293,10 @@ export function registerRenderFeature(app) {
 
     if (enableDrag) {
       node.addEventListener("pointerdown", (event) => {
-        if (event.target === deleteButton) return;
-        app.startPointerDrag(event, item.id, groupId, node);
+        if (event.target === deleteButton || event.target === selectButton) return;
+        app.startPointerDrag(event, item.id, groupId, node, {
+          onLongPress: recentOnly ? null : () => enterSelectionMode(item.id)
+        });
       });
     }
 
@@ -386,6 +401,7 @@ export function registerRenderFeature(app) {
   function toggleItemSelection(itemId) {
     const located = app.findItemById(itemId);
     if (!located) return;
+    app.runtime.selectionMode = true;
     app.runtime.selectionAnchorGroupId = located.group.id;
     if (app.runtime.selectedItemIds.has(itemId)) {
       app.runtime.selectedItemIds.delete(itemId);
@@ -395,15 +411,31 @@ export function registerRenderFeature(app) {
     render();
   }
 
+  function enterSelectionMode(itemId) {
+    const located = app.findItemById(itemId);
+    if (!located) return;
+    app.runtime.selectionMode = true;
+    app.runtime.selectionAnchorGroupId = located.group.id;
+    app.runtime.selectedItemIds.add(itemId);
+    app.runtime.preventNextClickItemId = itemId;
+    clearTimeout(app.runtime.preventNextClickTimer);
+    app.runtime.preventNextClickTimer = setTimeout(() => {
+      app.runtime.preventNextClickItemId = null;
+    }, 300);
+    render();
+  }
+
   function selectCurrentGroupItems() {
     const group = getSelectionAnchorGroup();
     if (!group) return;
+    app.runtime.selectionMode = true;
     group.items.forEach((item) => app.runtime.selectedItemIds.add(item.id));
     app.runtime.selectionAnchorGroupId = group.id;
     render();
   }
 
   function selectAllItems() {
+    app.runtime.selectionMode = true;
     app.store.state.groups.forEach((group) => {
       group.items.forEach((item) => app.runtime.selectedItemIds.add(item.id));
     });
@@ -416,6 +448,7 @@ export function registerRenderFeature(app) {
   function clearSelection() {
     app.runtime.selectedItemIds.clear();
     app.runtime.selectionAnchorGroupId = null;
+    app.runtime.selectionMode = false;
     render();
   }
 
@@ -450,7 +483,7 @@ export function registerRenderFeature(app) {
   function syncBatchToolbar() {
     const selectedCount = app.runtime.selectedItemIds.size;
     if (!app.refs.batchToolbar) return;
-    app.refs.batchToolbar.hidden = selectedCount === 0;
+    app.refs.batchToolbar.hidden = !app.runtime.selectionMode && selectedCount === 0;
     if (app.refs.batchCount) app.refs.batchCount.textContent = `已选择 ${selectedCount} 项`;
     if (app.refs.batchGroupSelect) {
       const currentValue = app.refs.batchGroupSelect.value;
@@ -478,6 +511,7 @@ export function registerRenderFeature(app) {
 
     app.runtime.selectedItemIds.clear();
     app.runtime.selectionAnchorGroupId = null;
+    app.runtime.selectionMode = false;
     app.ensureValidGroups();
     app.saveState();
     render();
@@ -500,6 +534,7 @@ export function registerRenderFeature(app) {
     });
     app.runtime.selectedItemIds.clear();
     app.runtime.selectionAnchorGroupId = null;
+    app.runtime.selectionMode = false;
     app.ensureValidGroups();
     app.saveState();
     render();

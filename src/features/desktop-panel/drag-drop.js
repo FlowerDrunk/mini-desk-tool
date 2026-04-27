@@ -147,24 +147,32 @@ export function registerDragDropFeature(app) {
     clearAllDropTargets();
   }
 
-  function getDropTargetFromPosition(position) {
-    const normalizedPoint = normalizeViewportPoint(position);
-    const x = normalizedPoint?.x;
-    const y = normalizedPoint?.y;
+  function getDropTargetFromPosition(position, options = {}) {
+    const point = normalizeViewportPoint(position, options);
+    const x = point?.x;
+    const y = point?.y;
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
       return { dropGrid: null, targetGroupId: DEFAULT_GROUP, dropIndex: undefined, groupSection: null };
     }
 
-    const target = document.elementFromPoint(x, y);
-    const dropGrid = getRealDropGrid(target);
+    const dropGrid = getRealDropGrid(document.elementFromPoint(x, y));
     const groupSection = dropGrid?.closest(".group") || null;
     const targetGroupId = dropGrid?.dataset.groupId || DEFAULT_GROUP;
     const dropIndex = dropGrid ? getDropIndex(dropGrid, { clientX: x, clientY: y }) : undefined;
-    return { dropGrid, targetGroupId, dropIndex, groupSection };
+    return { dropGrid, targetGroupId, dropIndex, groupSection, point };
   }
 
   function getRealDropGrid(target) {
-    const dropGrid = target?.closest?.(".group-grid") || null;
+    const directGrid = target?.closest?.(".group-grid") || null;
+    if (directGrid?.dataset.recent === "true") return null;
+    if (directGrid) return directGrid;
+
+    const groupSection = target?.closest?.(".group") || null;
+    const sectionGrid = groupSection?.querySelector?.(".group-grid") || null;
+    if (sectionGrid?.dataset.recent === "true") return null;
+    const isPointOnRecentHeader = groupSection?.classList?.contains("recent-group");
+    if (isPointOnRecentHeader) return null;
+    const dropGrid = sectionGrid;
     return dropGrid?.dataset.recent === "true" ? null : dropGrid;
   }
 
@@ -238,6 +246,10 @@ export function registerDragDropFeature(app) {
   }
 
   function clearAllDropTargets() {
+    clearDropTargetHighlights();
+  }
+
+  function clearDropTargetHighlights() {
     document.querySelectorAll(".group-grid").forEach((grid) => grid.classList.remove("drop-target", "drop-full", "drop-empty"));
     document.querySelectorAll(".group").forEach((group) => group.classList.remove("group-drop-target"));
     clearDropIndicator();
@@ -249,12 +261,14 @@ export function registerDragDropFeature(app) {
       app.runtime.externalDragDepth += 1;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      updateExternalDropState({ x: event.clientX, y: event.clientY });
     };
 
     const onDragOver = (event) => {
       if (!isExternalFileDrag(event)) return;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      updateExternalDropState({ x: event.clientX, y: event.clientY });
     };
 
     const onDragLeave = (event) => {
@@ -269,11 +283,12 @@ export function registerDragDropFeature(app) {
       event.preventDefault();
       event.stopPropagation();
       app.runtime.externalDragDepth = 0;
-      clearAllDropTargets();
 
-      const dropGrid = getRealDropGrid(event.target);
-      const targetGroupId = dropGrid?.dataset.groupId || DEFAULT_GROUP;
-      const dropIndex = dropGrid ? getDropIndex(dropGrid, event) : undefined;
+      const { dropGrid, targetGroupId, dropIndex } = getDropTargetFromPosition({
+        x: event.clientX,
+        y: event.clientY
+      });
+      clearAllDropTargets();
       await importDroppedPaths(event, targetGroupId, dropIndex);
     };
 
@@ -292,13 +307,17 @@ export function registerDragDropFeature(app) {
           return;
         }
 
-        const { dropGrid, groupSection, targetGroupId, dropIndex } = getDropTargetFromPosition(payload.position);
+        const { dropGrid, groupSection, targetGroupId, dropIndex } = getDropTargetFromPosition(payload.position, {
+          physical: true,
+          scaleFactor: payload.scaleFactor
+        });
         clearAllDropTargets();
         if (dropGrid) dropGrid.classList.add("drop-target");
         if (groupSection) groupSection.classList.add("group-drop-target");
 
         if (payload.type === "drop") {
           await importDroppedFiles(payload.paths || [], targetGroupId, dropIndex);
+          clearAllDropTargets();
         }
       } catch {
         app.runtime.externalDragDepth = 0;
@@ -306,6 +325,13 @@ export function registerDragDropFeature(app) {
         app.reportIssue?.("拖拽导入失败", "请稍后重试或改用设置中的导入入口");
       }
     });
+  }
+
+  function updateExternalDropState(position) {
+    const { dropGrid, groupSection } = getDropTargetFromPosition(position);
+    clearDropTargetHighlights();
+    if (dropGrid) dropGrid.classList.add("drop-target");
+    if (groupSection) groupSection.classList.add("group-drop-target");
   }
 
   function isExternalFileDrag(event) {
@@ -338,10 +364,11 @@ export function registerDragDropFeature(app) {
     return { ok: true };
   }
 
-  function startPointerDrag(event, itemId, fromGroupId, node) {
+  function startPointerDrag(event, itemId, fromGroupId, node, options = {}) {
     if (event.button !== 0) return;
     if (!(node instanceof HTMLElement)) return;
     event.preventDefault();
+    if (app.runtime.selectionMode) return;
 
     app.runtime.pointerDrag = {
       pointerId: event.pointerId,
@@ -353,12 +380,23 @@ export function registerDragDropFeature(app) {
       startY: event.clientY
     };
 
+    const longPressTimer = typeof options.onLongPress === "function"
+      ? setTimeout(() => {
+          const dragState = app.runtime.pointerDrag;
+          if (!dragState || dragState.pointerId !== event.pointerId || dragState.started) return;
+          app.runtime.pointerDrag = null;
+          options.onLongPress();
+          cleanup();
+        }, 520)
+      : null;
+
     const handlePointerMove = (moveEvent) => {
       const dragState = app.runtime.pointerDrag;
       if (!dragState || moveEvent.pointerId !== dragState.pointerId) return;
 
       const distance = Math.hypot(moveEvent.clientX - dragState.startX, moveEvent.clientY - dragState.startY);
       if (!dragState.started && distance < 8) return;
+      clearTimeout(longPressTimer);
 
       if (!dragState.started) {
         dragState.started = true;
@@ -391,6 +429,7 @@ export function registerDragDropFeature(app) {
       if (!dragState || finishEvent.pointerId !== dragState.pointerId) return;
 
       const wasDragging = dragState.started;
+      clearTimeout(longPressTimer);
       if (wasDragging) {
         finishEvent.preventDefault();
         const { dropGrid, targetGroupId } = getDropTargetFromPosition({
@@ -428,6 +467,7 @@ export function registerDragDropFeature(app) {
       const dragState = app.runtime.pointerDrag;
       if (!dragState || cancelEvent.pointerId !== dragState.pointerId) return;
       const wasDragging = dragState.started;
+      clearTimeout(longPressTimer);
       dragState.node.classList.remove("dragging");
       app.refs.appShell.classList.remove("is-item-dragging");
       document.documentElement.classList.remove("is-item-dragging");
@@ -440,6 +480,7 @@ export function registerDragDropFeature(app) {
     };
 
     const cleanup = () => {
+      clearTimeout(longPressTimer);
       window.removeEventListener("pointermove", handlePointerMove, true);
       window.removeEventListener("pointerup", finishPointerDrag, true);
       window.removeEventListener("pointercancel", cancelPointerDrag, true);
@@ -514,18 +555,24 @@ export function registerDragDropFeature(app) {
     app.runtime.dropIndicator = null;
   }
 
-  function normalizeViewportPoint(position) {
+  function normalizeViewportPoint(position, options = {}) {
     const rawX = Number(position?.x);
     const rawY = Number(position?.y);
     if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) return null;
 
     const pixelRatio = Number(window.devicePixelRatio) || 1;
+    const physicalScale = options.physical
+      ? Math.max(1, Number(options.scaleFactor) || pixelRatio)
+      : 1;
+    const scaledX = rawX / physicalScale;
+    const scaledY = rawY / physicalScale;
     const looksPhysical =
+      !options.physical &&
       pixelRatio > 1 &&
-      (rawX > window.innerWidth + 1 || rawY > window.innerHeight + 1);
+      (scaledX > window.innerWidth + 1 || scaledY > window.innerHeight + 1);
 
-    const normalizedX = looksPhysical ? rawX / pixelRatio : rawX;
-    const normalizedY = looksPhysical ? rawY / pixelRatio : rawY;
+    const normalizedX = looksPhysical ? rawX / pixelRatio : scaledX;
+    const normalizedY = looksPhysical ? rawY / pixelRatio : scaledY;
 
     return {
       x: Math.max(0, Math.min(normalizedX, Math.max(0, window.innerWidth - 1))),

@@ -90,7 +90,34 @@
     <form method="dialog" id="settingsForm" class="dialog-form">
       <h2>软件设置</h2>
 
-      <section class="settings-section">
+      <nav id="settingsNav" class="settings-nav" aria-label="设置分类导航">
+        <button class="settings-nav-button" type="button" data-target-section="profile" aria-label="配置文件">
+          <span class="settings-nav-icon" aria-hidden="true">◉</span>
+          <span class="settings-nav-label">配置文件</span>
+        </button>
+        <button class="settings-nav-button" type="button" data-target-section="appearance" aria-label="外观布局">
+          <span class="settings-nav-icon" aria-hidden="true">✦</span>
+          <span class="settings-nav-label">外观布局</span>
+        </button>
+        <button class="settings-nav-button" type="button" data-target-section="display" aria-label="显示搜索">
+          <span class="settings-nav-icon" aria-hidden="true">⌕</span>
+          <span class="settings-nav-label">显示搜索</span>
+        </button>
+        <button class="settings-nav-button" type="button" data-target-section="window" aria-label="窗口行为">
+          <span class="settings-nav-icon" aria-hidden="true">▣</span>
+          <span class="settings-nav-label">窗口行为</span>
+        </button>
+        <button class="settings-nav-button" type="button" data-target-section="backup" aria-label="备份恢复">
+          <span class="settings-nav-icon" aria-hidden="true">☁</span>
+          <span class="settings-nav-label">备份恢复</span>
+        </button>
+        <button class="settings-nav-button" type="button" data-target-section="data" aria-label="数据整理">
+          <span class="settings-nav-icon" aria-hidden="true">▤</span>
+          <span class="settings-nav-label">数据整理</span>
+        </button>
+      </nav>
+
+      <section class="settings-section" data-settings-section="profile">
         <h3>配置文件</h3>
 
         <label>
@@ -110,7 +137,7 @@
         <p id="profileStatus" class="field-hint">切换配置会自动保存当前图标、分组和布局。</p>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" data-settings-section="appearance">
         <h3>外观与布局</h3>
 
         <label>
@@ -129,14 +156,55 @@
             <option value="aurora">极光蓝</option>
             <option value="graphite">石墨灰</option>
             <option value="sand">暖沙金</option>
+            <option value="custom">自定义</option>
           </select>
         </label>
+
+        <div id="customThemeFields" class="custom-theme-fields" hidden>
+          <label>
+            主题名称
+            <input id="customThemeNameInput" name="customThemeName" type="text" maxlength="18" placeholder="我的主题" />
+          </label>
+
+          <div class="color-field-grid">
+            <label>
+              主色
+              <input id="customThemeAccentInput" name="customThemeAccent" type="color" />
+            </label>
+
+            <label>
+              辅色
+              <input id="customThemeAccent2Input" name="customThemeAccent2" type="color" />
+            </label>
+
+            <label>
+              底色
+              <input id="customThemeSurfaceInput" name="customThemeSurface" type="color" />
+            </label>
+          </div>
+        </div>
 
         <label>
           面板透明度
           <input id="panelOpacityInput" name="panelOpacity" type="range" min="58" max="96" step="2" />
         </label>
         <p id="appearanceHint" class="field-hint">当前主题会影响搜索框、工具条和图标选中高亮。</p>
+
+        <label>
+          字体
+          <select id="fontFamilySelect" name="fontFamily">
+            <option value="noto">思源黑体</option>
+            <option value="yahei">微软雅黑</option>
+            <option value="songti">宋体</option>
+            <option value="rounded">圆润黑体</option>
+            <option value="mono">等宽字体</option>
+          </select>
+        </label>
+
+        <label>
+          文字颜色
+          <input id="textColorInput" name="textColor" type="color" />
+        </label>
 
         <label>
           基础图标大小
@@ -163,7 +231,7 @@
         <p id="trackCountHint" class="field-hint">当前每排显示 3 个图标</p>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" data-settings-section="display">
         <h3>显示与搜索</h3>
 
         <label class="checkbox">
@@ -203,7 +271,7 @@
         <p id="searchEngineHint" class="field-hint">搜索框中按 Enter 会调用当前搜索引擎。</p>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" data-settings-section="window">
         <h3>窗口行为</h3>
 
         <label class="checkbox">
@@ -252,12 +320,12 @@
 
         <label>
           快捷键
-          <input id="globalShortcutInput" name="globalShortcut" type="text" maxlength="40" placeholder="CommandOrControl+Alt+Space" />
+          <input id="globalShortcutInput" name="globalShortcut" type="text" maxlength="40" placeholder="点击后按下快捷键" readonly />
         </label>
-        <p id="globalShortcutStatus" class="field-hint">默认：Ctrl+Alt+Space 显示或隐藏面板。</p>
+        <p id="globalShortcutStatus" class="field-hint">点击输入框后按下组合键，Esc 恢复默认，Backspace 清空。</p>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" data-settings-section="backup">
         <h3>备份与恢复</h3>
 
         <label class="checkbox">
@@ -279,7 +347,7 @@
         </div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" data-settings-section="data">
         <h3>数据与整理</h3>
 
         <div class="settings-actions">

@@ -7,8 +7,11 @@ import {
   createProfileSnapshot,
   DEFAULT_GLOBAL_SHORTCUT,
   DEFAULT_GROUP_ID,
+  DEFAULT_TEXT_COLOR,
   extractImportedState,
   findItem,
+  getFontConfig,
+  getThemeConfig,
   getNextProfileName,
   inferGroupName,
   LAYOUT_PRESETS,
@@ -18,6 +21,9 @@ import {
   REVEAL_DELAY_MAX,
   REVEAL_DELAY_MIN,
   sanitizeLayoutPreset,
+  sanitizeCustomTheme,
+  sanitizeColor,
+  sanitizeFontFamily,
   sanitizeSearchEngine,
   sanitizeSnapEdge,
   sanitizeShortcut,
@@ -25,7 +31,6 @@ import {
   SNAP_DISTANCE_MAX,
   SNAP_DISTANCE_MIN,
   syncActiveProfileState,
-  THEME_OPTIONS,
   TRACK_COUNT_MAX,
   TRACK_COUNT_MIN,
   uniqueGroupName,
@@ -97,6 +102,11 @@ export function registerDialogFeature(app) {
     app.refs.cancelAddDialog.addEventListener("click", () => closeDialog(app.refs.addDialog));
     app.refs.cancelSettingsDialog.addEventListener("click", () => closeDialog(app.refs.settingsDialog));
     app.refs.cancelEditDialog.addEventListener("click", () => closeDialog(app.refs.editDialog));
+    app.refs.settingsNav?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-target-section]");
+      if (!button) return;
+      scrollToSettingsSection(button.dataset.targetSection, button);
+    });
 
     app.refs.searchInput?.addEventListener("input", () => {
       app.setSearchQuery(app.refs.searchInput.value);
@@ -131,7 +141,18 @@ export function registerDialogFeature(app) {
       app.store.state.layout.theme = sanitizeTheme(app.refs.themeSelect.value);
       app.applyLayout();
       app.saveState();
+      syncCustomThemeFields();
       updateAppearanceHint();
+    });
+    [
+      app.refs.customThemeNameInput,
+      app.refs.customThemeAccentInput,
+      app.refs.customThemeAccent2Input,
+      app.refs.customThemeSurfaceInput
+    ].forEach((input) => {
+      input?.addEventListener("input", () => {
+        applyCustomThemeFromFields();
+      });
     });
     app.refs.panelOpacityInput?.addEventListener("input", () => {
       app.store.state.layout.panelOpacity = clampNumber(
@@ -140,6 +161,18 @@ export function registerDialogFeature(app) {
         PANEL_OPACITY_MAX,
         78
       );
+      app.applyLayout();
+      app.saveState();
+      updateAppearanceHint();
+    });
+    app.refs.fontFamilySelect?.addEventListener("change", () => {
+      app.store.state.layout.fontFamily = sanitizeFontFamily(app.refs.fontFamilySelect.value);
+      app.applyLayout();
+      app.saveState();
+      updateAppearanceHint();
+    });
+    app.refs.textColorInput?.addEventListener("input", () => {
+      app.store.state.layout.textColor = sanitizeColor(app.refs.textColorInput.value, DEFAULT_TEXT_COLOR);
       app.applyLayout();
       app.saveState();
       updateAppearanceHint();
@@ -299,6 +332,7 @@ export function registerDialogFeature(app) {
       },
       true
     );
+    document.addEventListener("keydown", handleGlobalKeydown, true);
 
     window.addEventListener("blur", () => {
       hideMenus();
@@ -480,11 +514,12 @@ export function registerDialogFeature(app) {
       void syncWindowBehavior();
     });
 
-    app.refs.globalShortcutInput?.addEventListener("change", () => {
-      app.store.state.app.globalShortcut = sanitizeShortcut(app.refs.globalShortcutInput.value || DEFAULT_GLOBAL_SHORTCUT);
-      app.refs.globalShortcutInput.value = app.store.state.app.globalShortcut;
-      app.saveState();
-      void syncWindowBehavior();
+    app.refs.globalShortcutInput?.addEventListener("keydown", handleGlobalShortcutCapture);
+    app.refs.globalShortcutInput?.addEventListener("focus", () => {
+      app.runtime.shortcutEscapeArmed = false;
+      if (app.refs.globalShortcutStatus) {
+        app.refs.globalShortcutStatus.textContent = "请按下快捷键组合，例如 Ctrl+Alt+Space。";
+      }
     });
 
     app.refs.autoBackupEnabledInput?.addEventListener("change", () => {
@@ -565,6 +600,7 @@ export function registerDialogFeature(app) {
     app.runtime.recentPage = 0;
     app.runtime.selectedItemIds.clear();
     app.runtime.selectionAnchorGroupId = null;
+    app.runtime.selectionMode = false;
     app.applyLayout();
     app.desktopPanel?.setWindowSize?.(app.store.state.layout.windowWidth);
     app.saveState();
@@ -629,8 +665,36 @@ export function registerDialogFeature(app) {
 
   function updateAppearanceHint() {
     if (!app.refs.appearanceHint) return;
-    const theme = THEME_OPTIONS[app.store.state.layout.theme] || THEME_OPTIONS.aurora;
-    app.refs.appearanceHint.textContent = `当前主题：${theme.label}；面板透明度 ${app.store.state.layout.panelOpacity}%。`;
+    const theme = getThemeConfig(app.store.state.layout);
+    const font = getFontConfig(app.store.state.layout);
+    app.refs.appearanceHint.textContent = `当前主题：${theme.label}；字体：${font.label}；面板透明度 ${app.store.state.layout.panelOpacity}%。`;
+  }
+
+  function syncCustomThemeFields() {
+    const customTheme = sanitizeCustomTheme(app.store.state.layout.customTheme);
+    app.store.state.layout.customTheme = customTheme;
+    const isCustom = sanitizeTheme(app.store.state.layout.theme) === "custom";
+
+    if (app.refs.customThemeFields) app.refs.customThemeFields.hidden = !isCustom;
+    if (app.refs.customThemeNameInput) app.refs.customThemeNameInput.value = customTheme.label;
+    if (app.refs.customThemeAccentInput) app.refs.customThemeAccentInput.value = customTheme.accent;
+    if (app.refs.customThemeAccent2Input) app.refs.customThemeAccent2Input.value = customTheme.accent2;
+    if (app.refs.customThemeSurfaceInput) app.refs.customThemeSurfaceInput.value = customTheme.surface;
+  }
+
+  function applyCustomThemeFromFields() {
+    app.store.state.layout.theme = "custom";
+    if (app.refs.themeSelect) app.refs.themeSelect.value = "custom";
+    app.store.state.layout.customTheme = sanitizeCustomTheme({
+      label: app.refs.customThemeNameInput?.value,
+      accent: app.refs.customThemeAccentInput?.value,
+      accent2: app.refs.customThemeAccent2Input?.value,
+      surface: app.refs.customThemeSurfaceInput?.value
+    });
+    syncCustomThemeFields();
+    app.applyLayout();
+    app.saveState();
+    updateAppearanceHint();
   }
 
   function syncSearchEngineFields() {
@@ -856,10 +920,17 @@ export function registerDialogFeature(app) {
     if (app.refs.themeSelect) {
       app.refs.themeSelect.value = sanitizeTheme(app.store.state.layout.theme);
     }
+    syncCustomThemeFields();
     if (app.refs.panelOpacityInput) {
       app.refs.panelOpacityInput.value = String(
         clampNumber(app.store.state.layout.panelOpacity, PANEL_OPACITY_MIN, PANEL_OPACITY_MAX, 78)
       );
+    }
+    if (app.refs.fontFamilySelect) {
+      app.refs.fontFamilySelect.value = sanitizeFontFamily(app.store.state.layout.fontFamily);
+    }
+    if (app.refs.textColorInput) {
+      app.refs.textColorInput.value = sanitizeColor(app.store.state.layout.textColor, DEFAULT_TEXT_COLOR);
     }
     updateAppearanceHint();
     syncSearchEngineFields();
@@ -912,6 +983,91 @@ export function registerDialogFeature(app) {
     await syncGlobalShortcut();
   }
 
+  function handleGlobalShortcutCapture(event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.key === "Escape") {
+      const currentShortcut = sanitizeShortcut(app.refs.globalShortcutInput?.value || app.store.state.app.globalShortcut || DEFAULT_GLOBAL_SHORTCUT);
+      if (app.runtime.shortcutEscapeArmed && currentShortcut === DEFAULT_GLOBAL_SHORTCUT) {
+        app.runtime.shortcutEscapeArmed = false;
+        closeDialog(app.refs.settingsDialog);
+        return;
+      }
+
+      app.store.state.app.globalShortcut = DEFAULT_GLOBAL_SHORTCUT;
+      if (app.refs.globalShortcutInput) app.refs.globalShortcutInput.value = DEFAULT_GLOBAL_SHORTCUT;
+      app.runtime.shortcutEscapeArmed = true;
+      app.saveState();
+      void syncWindowBehavior();
+      return;
+    }
+
+    if (event.key === "Backspace" || event.key === "Delete") {
+      app.runtime.shortcutEscapeArmed = false;
+      app.store.state.app.globalShortcutEnabled = false;
+      app.store.state.app.globalShortcut = DEFAULT_GLOBAL_SHORTCUT;
+      if (app.refs.globalShortcutEnabledInput) app.refs.globalShortcutEnabledInput.checked = false;
+      if (app.refs.globalShortcutInput) app.refs.globalShortcutInput.value = "";
+      app.saveState();
+      void syncWindowBehavior();
+      return;
+    }
+
+    const shortcut = shortcutFromKeyboardEvent(event);
+    if (!shortcut) {
+      app.runtime.shortcutEscapeArmed = false;
+      if (app.refs.globalShortcutStatus) {
+        app.refs.globalShortcutStatus.textContent = "请继续按下一个非修饰键，例如 Ctrl+Alt+Space。";
+      }
+      return;
+    }
+
+    app.store.state.app.globalShortcut = shortcut;
+    app.runtime.shortcutEscapeArmed = false;
+    if (app.refs.globalShortcutInput) app.refs.globalShortcutInput.value = shortcut;
+    app.saveState();
+    void syncWindowBehavior();
+  }
+
+  function shortcutFromKeyboardEvent(event) {
+    const mainKey = normalizeShortcutKey(event);
+    if (!mainKey) return "";
+
+    const parts = [];
+    if (event.ctrlKey || event.metaKey) parts.push("CommandOrControl");
+    if (event.altKey) parts.push("Alt");
+    if (event.shiftKey) parts.push("Shift");
+
+    const isFunctionKey = /^F([1-9]|1[0-9]|2[0-4])$/.test(mainKey);
+    if (!parts.length && !isFunctionKey) return "";
+    parts.push(mainKey);
+    return sanitizeShortcut(parts.join("+"));
+  }
+
+  function normalizeShortcutKey(event) {
+    const key = String(event.key || "");
+    if (["Control", "Meta", "Alt", "Shift"].includes(key)) return "";
+    if (key === " ") return "Space";
+
+    const namedKeys = {
+      "ArrowUp": "Up",
+      "ArrowDown": "Down",
+      "ArrowLeft": "Left",
+      "ArrowRight": "Right",
+      "Esc": "Escape",
+      "PageUp": "PageUp",
+      "PageDown": "PageDown"
+    };
+    if (namedKeys[key]) return namedKeys[key];
+    if (/^F([1-9]|1[0-9]|2[0-4])$/.test(key)) return key;
+    if (/^[a-z]$/i.test(key)) return key.toUpperCase();
+    if (/^[0-9]$/.test(key)) return key;
+    if (event.code?.startsWith("Key")) return event.code.slice(3).toUpperCase();
+    if (event.code?.startsWith("Digit")) return event.code.slice(5);
+    return key.length === 1 ? key.toUpperCase() : key;
+  }
+
   async function syncNativeWindowBehavior() {
     await app.desktopPanel?.configureWindowBehavior?.({
       autoHideEnabled: !!app.store.state.app.autoHideOnBlur,
@@ -960,13 +1116,67 @@ export function registerDialogFeature(app) {
     }
   }
 
+  function scrollToSettingsSection(sectionName, activeButton = null) {
+    const section = app.refs.settingsDialog?.querySelector?.(`[data-settings-section="${sectionName}"]`);
+    if (!section) return;
+
+    section.scrollIntoView({ block: "start", behavior: "smooth" });
+    section.setAttribute("tabindex", "-1");
+    section.focus({ preventScroll: true });
+
+    app.refs.settingsNav?.querySelectorAll(".settings-nav-button.is-active").forEach((button) => {
+      button.classList.remove("is-active");
+    });
+    app.refs.settingsDialog?.querySelectorAll(".settings-section.is-jump-target").forEach((targetSection) => {
+      targetSection.classList.remove("is-jump-target");
+    });
+
+    activeButton?.classList?.add("is-active");
+    section.classList.add("is-jump-target");
+    clearTimeout(app.runtime.settingsNavActiveTimer);
+    clearTimeout(app.runtime.settingsSectionFocusTimer);
+    app.runtime.settingsNavActiveTimer = setTimeout(() => {
+      activeButton?.classList?.remove("is-active");
+    }, 900);
+    app.runtime.settingsSectionFocusTimer = setTimeout(() => {
+      section.classList.remove("is-jump-target");
+    }, 1200);
+  }
+
+  function handleGlobalKeydown(event) {
+    if (event.key !== "Escape") return;
+    if (event.target === app.refs.globalShortcutInput) return;
+
+    if (hasVisibleMenu()) {
+      event.preventDefault();
+      event.stopPropagation();
+      hideMenus();
+      return;
+    }
+
+    const activeDialog = getOpenDialog();
+    if (!activeDialog) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    closeDialog(activeDialog);
+  }
+
   function hideMenus() {
     app.refs.appContextMenu.hidden = true;
     app.refs.itemContextMenu.hidden = true;
   }
 
+  function hasVisibleMenu() {
+    return !app.refs.appContextMenu.hidden || !app.refs.itemContextMenu.hidden;
+  }
+
   function hasOpenDialog() {
     return [app.refs.addDialog, app.refs.settingsDialog, app.refs.editDialog].some((dialog) => dialog?.open);
+  }
+
+  function getOpenDialog() {
+    return [app.refs.editDialog, app.refs.addDialog, app.refs.settingsDialog].find((dialog) => dialog?.open) || null;
   }
 
   function openMenu(menu, x, y) {
@@ -1002,6 +1212,7 @@ export function registerDialogFeature(app) {
   }
 
   function closeDialog(dialog) {
+    if (dialog === app.refs.settingsDialog) app.runtime.shortcutEscapeArmed = false;
     dialog.removeAttribute("open");
     dialog.hidden = true;
     dialog.style.visibility = "";

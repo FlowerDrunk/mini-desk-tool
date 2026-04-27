@@ -17,6 +17,7 @@ export const BACKUP_RETENTION_MIN = 1;
 export const BACKUP_RETENTION_MAX = 12;
 export const PANEL_OPACITY_MIN = 58;
 export const PANEL_OPACITY_MAX = 96;
+export const DEFAULT_TEXT_COLOR = "#ffffff";
 
 export const LAYOUT_PRESETS = {
   compact: { label: "紧凑", iconSize: 48, windowWidth: 300, trackCount: 3, showItemLabel: false },
@@ -24,10 +25,26 @@ export const LAYOUT_PRESETS = {
   wide: { label: "宽屏", iconSize: 64, windowWidth: 520, trackCount: 4, showItemLabel: true }
 };
 
+export const FONT_OPTIONS = {
+  noto: { label: "思源黑体", value: "\"Noto Sans SC\", \"Microsoft YaHei\", sans-serif" },
+  yahei: { label: "微软雅黑", value: "\"Microsoft YaHei\", \"Noto Sans SC\", sans-serif" },
+  songti: { label: "宋体", value: "\"SimSun\", \"Noto Serif SC\", serif" },
+  rounded: { label: "圆润黑体", value: "\"Microsoft JhengHei\", \"Noto Sans SC\", sans-serif" },
+  mono: { label: "等宽字体", value: "\"Cascadia Mono\", \"Consolas\", monospace" }
+};
+
 export const THEME_OPTIONS = {
   aurora: { label: "极光蓝", accent: "#75ffd9", accent2: "#59acff", accentRgb: "117, 255, 217", accent2Rgb: "89, 172, 255", surface: "17, 21, 27" },
   graphite: { label: "石墨灰", accent: "#d7e0ea", accent2: "#8ea1b8", accentRgb: "215, 224, 234", accent2Rgb: "142, 161, 184", surface: "18, 20, 23" },
-  sand: { label: "暖沙金", accent: "#ffd27a", accent2: "#ff8f5a", accentRgb: "255, 210, 122", accent2Rgb: "255, 143, 90", surface: "34, 27, 20" }
+  sand: { label: "暖沙金", accent: "#ffd27a", accent2: "#ff8f5a", accentRgb: "255, 210, 122", accent2Rgb: "255, 143, 90", surface: "34, 27, 20" },
+  custom: { label: "自定义", accent: "#75ffd9", accent2: "#59acff", accentRgb: "117, 255, 217", accent2Rgb: "89, 172, 255", surface: "17, 21, 27" }
+};
+
+export const DEFAULT_CUSTOM_THEME = {
+  label: "我的主题",
+  accent: "#75ffd9",
+  accent2: "#59acff",
+  surface: "#11151b"
 };
 
 export const SEARCH_ENGINES = {
@@ -58,6 +75,9 @@ export function createDefaultState() {
       trackCount: 3,
       layoutPreset: "standard",
       theme: "aurora",
+      customTheme: structuredClone(DEFAULT_CUSTOM_THEME),
+      fontFamily: "noto",
+      textColor: DEFAULT_TEXT_COLOR,
       panelOpacity: 78,
       searchEngine: "bing"
     },
@@ -202,6 +222,56 @@ export function sanitizeLayoutPreset(value) {
 export function sanitizeTheme(value) {
   const theme = String(value || "").trim().toLowerCase();
   return theme in THEME_OPTIONS ? theme : "aurora";
+}
+
+export function sanitizeFontFamily(value) {
+  const font = String(value || "").trim().toLowerCase();
+  return font in FONT_OPTIONS ? font : "noto";
+}
+
+export function sanitizeColor(value, fallback) {
+  const color = String(value || "").trim();
+  return /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : fallback;
+}
+
+export function colorToRgbList(color, fallback = "#000000") {
+  const safeColor = sanitizeColor(color, fallback);
+  const value = safeColor.slice(1);
+  return [
+    parseInt(value.slice(0, 2), 16),
+    parseInt(value.slice(2, 4), 16),
+    parseInt(value.slice(4, 6), 16)
+  ].join(", ");
+}
+
+export function sanitizeCustomTheme(input) {
+  const fallback = DEFAULT_CUSTOM_THEME;
+  return {
+    label: repairDisplayText(String(input?.label || fallback.label).trim() || fallback.label).slice(0, 18),
+    accent: sanitizeColor(input?.accent, fallback.accent),
+    accent2: sanitizeColor(input?.accent2, fallback.accent2),
+    surface: sanitizeColor(input?.surface, fallback.surface)
+  };
+}
+
+export function getThemeConfig(layout = {}) {
+  const themeName = sanitizeTheme(layout.theme);
+  if (themeName !== "custom") return THEME_OPTIONS[themeName] || THEME_OPTIONS.aurora;
+
+  const customTheme = sanitizeCustomTheme(layout.customTheme);
+  return {
+    label: customTheme.label || THEME_OPTIONS.custom.label,
+    accent: customTheme.accent,
+    accent2: customTheme.accent2,
+    accentRgb: colorToRgbList(customTheme.accent, DEFAULT_CUSTOM_THEME.accent),
+    accent2Rgb: colorToRgbList(customTheme.accent2, DEFAULT_CUSTOM_THEME.accent2),
+    surface: colorToRgbList(customTheme.surface, DEFAULT_CUSTOM_THEME.surface)
+  };
+}
+
+export function getFontConfig(layout = {}) {
+  const fontName = sanitizeFontFamily(layout.fontFamily);
+  return FONT_OPTIONS[fontName] || FONT_OPTIONS.noto;
 }
 
 export function sanitizeSearchEngine(value) {
@@ -351,6 +421,9 @@ function hydrateLayout(input) {
     trackCount: clampNumber(input?.trackCount, TRACK_COUNT_MIN, TRACK_COUNT_MAX, 3),
     layoutPreset: sanitizeLayoutPreset(input?.layoutPreset || "standard"),
     theme: sanitizeTheme(input?.theme),
+    customTheme: sanitizeCustomTheme(input?.customTheme),
+    fontFamily: sanitizeFontFamily(input?.fontFamily),
+    textColor: sanitizeColor(input?.textColor, DEFAULT_TEXT_COLOR),
     panelOpacity: clampNumber(input?.panelOpacity, PANEL_OPACITY_MIN, PANEL_OPACITY_MAX, 78),
     searchEngine: sanitizeSearchEngine(input?.searchEngine)
   };
