@@ -2,10 +2,9 @@ use std::{
     collections::HashSet,
     fs,
     path::{Path, PathBuf},
-    process::Command,
     sync::Mutex,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 #[cfg(target_os = "windows")]
 use std::{iter, os::windows::ffi::OsStrExt};
@@ -31,7 +30,10 @@ use windows::{
             CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
             COINIT_APARTMENTTHREADED, STGM,
         },
-        UI::Shell::{IShellLinkW, ShellLink},
+        UI::{
+            Shell::{IShellLinkW, ShellExecuteW, ShellLink},
+            WindowsAndMessaging::SW_SHOWNORMAL,
+        },
     },
 };
 
@@ -42,6 +44,11 @@ const WINDOW_MARGIN_TOP: f64 = 0.0;
 const WINDOW_MARGIN_RIGHT: f64 = 16.0;
 const DEFAULT_SNAP_DISTANCE: f64 = 14.0;
 const DEFAULT_REVEAL_DELAY_MS: u64 = 250;
+const DEFAULT_DRAWER_COLLAPSE_DELAY_MS: u64 = 450;
+const DRAWER_COLLAPSE_DELAY_MAX_MS: u64 = 5000;
+const DRAWER_HANDLE_SIZE: f64 = 22.0;
+const DRAWER_ANIMATION_DURATION_MS: u64 = 180;
+const DRAWER_ANIMATION_FRAME_MS: u64 = 16;
 const EDGE_WATCH_INTERVAL_MS: u64 = 90;
 const SNAP_RELEASE_PADDING: f64 = 12.0;
 const SNAP_IDLE_DELAY_MS: u64 = 120;
@@ -69,6 +76,11 @@ struct WindowRuntimeState {
     snap_distance: f64,
     auto_hide_enabled: bool,
     reveal_delay_ms: u64,
+    drawer_enabled: bool,
+    drawer_collapsed: bool,
+    drawer_edge: SnapEdge,
+    drawer_resolved_edge: SnapEdge,
+    drawer_collapse_delay_ms: u64,
     edge_watcher_revision: u64,
     move_revision: u64,
     is_quitting: bool,
@@ -186,7 +198,11 @@ struct OfficialCandidate {
 }
 
 #[tauri::command]
-fn hide_main_window(window: Window) -> Result<(), String> {
+fn hide_main_window(window: Window, state: State<RuntimeState>) -> Result<(), String> {
+    if should_use_drawer(&state) {
+        return set_drawer_collapsed_for_window(&window, &state, true);
+    }
+
     window.hide().map_err(|error| error.to_string())
 }
 
@@ -214,28 +230,60 @@ fn configure_window_behavior(
     snap_edge: String,
     snap_distance: f64,
     reveal_delay_ms: u64,
+    drawer_enabled: bool,
+    drawer_edge: String,
+    drawer_delay_ms: u64,
 ) -> Result<(), String> {
     let edge = parse_snap_edge(&snap_edge);
+    let drawer_edge = parse_snap_edge(&drawer_edge);
     let distance = snap_distance.clamp(4.0, 64.0);
     let delay = reveal_delay_ms.min(1500);
-    let revision = {
+    let drawer_delay = drawer_delay_ms.min(DRAWER_COLLAPSE_DELAY_MAX_MS);
+    let (revision, was_drawer_collapsed) = {
         let mut runtime = state
             .inner
             .lock()
             .map_err(|_| "failed to lock runtime state".to_string())?;
+        let was_drawer_collapsed = runtime.drawer_collapsed;
         runtime.auto_hide_enabled = auto_hide_enabled;
         runtime.snap_edge = edge;
         runtime.snap_distance = distance;
         runtime.reveal_delay_ms = delay;
+        runtime.drawer_enabled = drawer_enabled;
+        runtime.drawer_edge = drawer_edge;
+        runtime.drawer_collapse_delay_ms = drawer_delay;
+        if !drawer_enabled {
+            runtime.drawer_collapsed = false;
+        }
         runtime.edge_watcher_revision = runtime.edge_watcher_revision.wrapping_add(1);
-        runtime.edge_watcher_revision
+        (runtime.edge_watcher_revision, was_drawer_collapsed)
     };
 
-    if auto_hide_enabled {
-        start_edge_reveal_watcher(app, revision);
+    if auto_hide_enabled && !drawer_enabled {
+        start_edge_reveal_watcher(app.clone(), revision);
+    }
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        window
+            .set_always_on_top(drawer_enabled)
+            .map_err(|error| error.to_string())?;
+    }
+    if !drawer_enabled && was_drawer_collapsed {
+        if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+            let state = window.state::<RuntimeState>();
+            set_drawer_collapsed_for_webview(&window, &state, false)?;
+        }
     }
 
     Ok(())
+}
+
+#[tauri::command]
+fn set_drawer_collapsed(
+    window: Window,
+    state: State<RuntimeState>,
+    collapsed: bool,
+) -> Result<(), String> {
+    set_drawer_collapsed_for_window(&window, &state, collapsed)
 }
 
 #[tauri::command]
@@ -302,6 +350,7 @@ fn snap_window_after_drag(window: Window, state: State<RuntimeState>) -> Result<
     if let Ok(mut runtime) = state.inner.lock() {
         runtime.snapped_x = None;
         runtime.snapped_y = None;
+        runtime.drawer_collapsed = false;
     }
 
     clamp_window_bounds(&window, &state)?;
@@ -439,12 +488,45 @@ async fn open_target(target: String) -> Result<(), String> {
 
     if let Some((file_path, arguments)) = split_path_and_args(normalized) {
         if let Some(args) = arguments {
-            start_process_with_arguments(&file_path, &args)?;
+            launch_target_with_arguments(&file_path, &args)?;
             return Ok(());
         }
     }
 
     opener::open(normalized).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn open_containing_folder(target: String) -> Result<(), String> {
+    let normalized = target.trim();
+    let Some((file_path, _)) = split_path_and_args(normalized) else {
+        return Err("target is not a local path".to_string());
+    };
+
+    let path = PathBuf::from(file_path);
+    let folder = if path.is_dir() {
+        path
+    } else {
+        path.parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| "target does not have a containing folder".to_string())?
+    };
+
+    opener::open(folder).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn open_as_admin(target: String) -> Result<(), String> {
+    let normalized = target.trim();
+    let Some((file_path, arguments)) = split_path_and_args(normalized) else {
+        return Err("target is not a local application".to_string());
+    };
+
+    launch_target_with_verb(
+        "runas",
+        &file_path,
+        arguments.as_deref().unwrap_or_default(),
+    )
 }
 
 #[tauri::command]
@@ -564,6 +646,9 @@ pub fn run() {
                 snap_edge: SnapEdge::Auto,
                 snap_distance: DEFAULT_SNAP_DISTANCE,
                 reveal_delay_ms: DEFAULT_REVEAL_DELAY_MS,
+                drawer_edge: SnapEdge::Auto,
+                drawer_resolved_edge: SnapEdge::Right,
+                drawer_collapse_delay_ms: DEFAULT_DRAWER_COLLAPSE_DELAY_MS,
                 ..WindowRuntimeState::default()
             }),
         })
@@ -616,12 +701,15 @@ pub fn run() {
             hide_main_window,
             toggle_main_window_command,
             open_target,
+            open_containing_folder,
+            open_as_admin,
             export_state,
             import_state,
             choose_backup_directory,
             write_backup_file,
             set_snap_enabled,
             configure_window_behavior,
+            set_drawer_collapsed,
             set_window_size,
             resolve_dropped_paths,
             scan_shortcut_locations,
@@ -654,7 +742,12 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             }
             HIDE_PANEL_ID => {
                 if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-                    let _ = window.hide();
+                    let state = window.state::<RuntimeState>();
+                    if should_use_drawer(&state) {
+                        let _ = set_drawer_collapsed_for_webview(&window, &state, true);
+                    } else {
+                        let _ = window.hide();
+                    }
                 }
             }
             QUIT_APP_ID => quit_application(app),
@@ -725,12 +818,16 @@ fn show_main_window(app: &AppHandle) -> Result<(), String> {
     let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
         return Ok(());
     };
+    let state = window.state::<RuntimeState>();
 
     if window.is_minimized().map_err(|error| error.to_string())? {
         window.unminimize().map_err(|error| error.to_string())?;
     }
 
     window.show().map_err(|error| error.to_string())?;
+    if is_drawer_collapsed(&state) {
+        set_drawer_collapsed_for_webview(&window, &state, false)?;
+    }
     window.set_focus().map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -741,7 +838,16 @@ fn toggle_main_window(app: &AppHandle) -> Result<(), String> {
     };
 
     if window.is_visible().map_err(|error| error.to_string())? {
-        window.hide().map_err(|error| error.to_string())?;
+        let state = window.state::<RuntimeState>();
+        if should_use_drawer(&state) {
+            if is_drawer_collapsed(&state) {
+                set_drawer_collapsed_for_webview(&window, &state, false)?;
+            } else {
+                set_drawer_collapsed_for_webview(&window, &state, true)?;
+            }
+        } else {
+            window.hide().map_err(|error| error.to_string())?;
+        }
     } else {
         show_main_window(app)?;
     }
@@ -901,12 +1007,153 @@ fn apply_bounds(
     Ok(())
 }
 
+fn animate_bounds(
+    window: &Window,
+    state: &State<RuntimeState>,
+    from: WindowBounds,
+    to: WindowBounds,
+) -> Result<(), String> {
+    if !should_animate_bounds(from, to) {
+        return apply_bounds(window, state, to);
+    }
+
+    {
+        let mut runtime = state
+            .inner
+            .lock()
+            .map_err(|_| "failed to lock runtime state".to_string())?;
+        runtime.adjusting_position = true;
+    }
+
+    let result = if should_animate_size(from, to) {
+        animate_window_bounds(from, to, |bounds| {
+            let size = Size::Logical(LogicalSize::new(bounds.width, bounds.height));
+            let position = Position::Logical(LogicalPosition::new(bounds.x, bounds.y));
+            window.set_size(size).map_err(|error| error.to_string())?;
+            window
+                .set_position(position)
+                .map_err(|error| error.to_string())
+        })
+    } else {
+        animate_window_bounds(from, to, |bounds| {
+            let position = Position::Logical(LogicalPosition::new(bounds.x, bounds.y));
+            window
+                .set_position(position)
+                .map_err(|error| error.to_string())
+        })
+    };
+
+    if let Ok(mut runtime) = state.inner.lock() {
+        runtime.adjusting_position = false;
+    }
+
+    result
+}
+
+fn animate_webview_bounds(
+    window: &WebviewWindow,
+    state: &State<RuntimeState>,
+    from: WindowBounds,
+    to: WindowBounds,
+) -> Result<(), String> {
+    if !should_animate_bounds(from, to) {
+        return apply_webview_bounds(window, state, to);
+    }
+
+    {
+        let mut runtime = state
+            .inner
+            .lock()
+            .map_err(|_| "failed to lock runtime state".to_string())?;
+        runtime.adjusting_position = true;
+    }
+
+    let result = if should_animate_size(from, to) {
+        animate_window_bounds(from, to, |bounds| {
+            let size = Size::Logical(LogicalSize::new(bounds.width, bounds.height));
+            let position = Position::Logical(LogicalPosition::new(bounds.x, bounds.y));
+            window.set_size(size).map_err(|error| error.to_string())?;
+            window
+                .set_position(position)
+                .map_err(|error| error.to_string())
+        })
+    } else {
+        animate_window_bounds(from, to, |bounds| {
+            let position = Position::Logical(LogicalPosition::new(bounds.x, bounds.y));
+            window
+                .set_position(position)
+                .map_err(|error| error.to_string())
+        })
+    };
+
+    if let Ok(mut runtime) = state.inner.lock() {
+        runtime.adjusting_position = false;
+    }
+
+    result
+}
+
+fn animate_window_bounds<F>(
+    from: WindowBounds,
+    to: WindowBounds,
+    mut apply: F,
+) -> Result<(), String>
+where
+    F: FnMut(WindowBounds) -> Result<(), String>,
+{
+    let duration = Duration::from_millis(DRAWER_ANIMATION_DURATION_MS);
+    let frame_duration = Duration::from_millis(DRAWER_ANIMATION_FRAME_MS);
+    let started_at = Instant::now();
+
+    loop {
+        let progress =
+            (started_at.elapsed().as_secs_f64() / duration.as_secs_f64()).clamp(0.0, 1.0);
+        apply(interpolate_bounds(from, to, ease_out_cubic(progress)))?;
+
+        if progress >= 1.0 {
+            break;
+        }
+
+        thread::sleep(frame_duration);
+    }
+
+    Ok(())
+}
+
+fn should_animate_bounds(from: WindowBounds, to: WindowBounds) -> bool {
+    (from.x - to.x).abs() > 1.0 || (from.y - to.y).abs() > 1.0 || should_animate_size(from, to)
+}
+
+fn should_animate_size(from: WindowBounds, to: WindowBounds) -> bool {
+    (from.width - to.width).abs() > 1.0 || (from.height - to.height).abs() > 1.0
+}
+
+fn interpolate_bounds(from: WindowBounds, to: WindowBounds, progress: f64) -> WindowBounds {
+    WindowBounds {
+        x: lerp(from.x, to.x, progress),
+        y: lerp(from.y, to.y, progress),
+        width: lerp(from.width, to.width, progress),
+        height: lerp(from.height, to.height, progress),
+    }
+}
+
+fn lerp(from: f64, to: f64, progress: f64) -> f64 {
+    from + (to - from) * progress
+}
+
+fn ease_out_cubic(progress: f64) -> f64 {
+    1.0 - (1.0 - progress.clamp(0.0, 1.0)).powi(3)
+}
+
 fn maybe_adjust_position(window: &Window, state: &State<RuntimeState>) -> Result<(), String> {
     let mut runtime = state
         .inner
         .lock()
         .map_err(|_| "failed to lock runtime state".to_string())?;
     if runtime.adjusting_position {
+        return Ok(());
+    }
+    if runtime.drawer_collapsed {
         return Ok(());
     }
 
@@ -982,7 +1229,7 @@ fn schedule_snap_after_move(window: &Window) {
             return;
         };
 
-        if runtime.adjusting_position || !runtime.snap_enabled {
+        if runtime.adjusting_position || runtime.drawer_collapsed || !runtime.snap_enabled {
             return;
         }
 
@@ -1000,6 +1247,7 @@ fn schedule_snap_after_move(window: &Window) {
             .lock()
             .map(|runtime| {
                 runtime.snap_enabled
+                    && !runtime.drawer_collapsed
                     && !runtime.adjusting_position
                     && runtime.move_revision == move_revision
             })
@@ -1017,7 +1265,12 @@ fn clamp_window_bounds(window: &Window, state: &State<RuntimeState>) -> Result<(
     let (snap_enabled, snap_edge) = state
         .inner
         .lock()
-        .map(|runtime| (runtime.snap_enabled, runtime.snap_edge))
+        .map(|runtime| {
+            (
+                runtime.snap_enabled && !runtime.drawer_collapsed,
+                runtime.snap_edge,
+            )
+        })
         .unwrap_or((false, SnapEdge::Auto));
     if !snap_enabled {
         return apply_bounds(window, state, clamp_bounds(current_bounds, work_area));
@@ -1184,6 +1437,193 @@ fn get_edge_docked_bounds(
     }
 }
 
+fn get_drawer_collapsed_bounds(
+    area: WorkArea,
+    edge: SnapEdge,
+    expanded: WindowBounds,
+) -> WindowBounds {
+    let expanded = get_drawer_expanded_bounds(area, edge, expanded);
+    match edge {
+        SnapEdge::Left => WindowBounds {
+            x: area.x - expanded.width + DRAWER_HANDLE_SIZE,
+            ..expanded
+        },
+        SnapEdge::Right | SnapEdge::Auto => WindowBounds {
+            x: area.x + area.width - DRAWER_HANDLE_SIZE,
+            ..expanded
+        },
+        SnapEdge::Top => WindowBounds {
+            y: area.y - expanded.height + DRAWER_HANDLE_SIZE,
+            ..expanded
+        },
+        SnapEdge::Bottom => WindowBounds {
+            y: area.y + area.height - DRAWER_HANDLE_SIZE,
+            ..expanded
+        },
+    }
+}
+
+fn get_drawer_expanded_bounds(
+    area: WorkArea,
+    edge: SnapEdge,
+    preferred: WindowBounds,
+) -> WindowBounds {
+    let width = preferred.width.clamp(MIN_WIDTH, area.width);
+    let height = preferred
+        .height
+        .clamp(MIN_HEIGHT.min(area.height), area.height);
+    let max_x = area.x + area.width - width;
+    let max_y = area.y + area.height - height;
+    let stable_x = preferred.x.clamp(area.x, max_x.max(area.x));
+    let stable_y = preferred.y.clamp(area.y, max_y.max(area.y));
+
+    match edge {
+        SnapEdge::Left => WindowBounds {
+            x: area.x,
+            y: stable_y,
+            width,
+            height,
+        },
+        SnapEdge::Right | SnapEdge::Auto => WindowBounds {
+            x: max_x,
+            y: stable_y,
+            width,
+            height,
+        },
+        SnapEdge::Top => WindowBounds {
+            x: stable_x,
+            y: area.y,
+            width,
+            height,
+        },
+        SnapEdge::Bottom => WindowBounds {
+            x: stable_x,
+            y: max_y,
+            width,
+            height,
+        },
+    }
+}
+
+fn resolve_drawer_edge(
+    configured_edge: SnapEdge,
+    bounds: WindowBounds,
+    area: WorkArea,
+) -> SnapEdge {
+    if configured_edge != SnapEdge::Auto {
+        return configured_edge;
+    }
+
+    let distances = [
+        (SnapEdge::Left, (bounds.x - area.x).abs()),
+        (
+            SnapEdge::Right,
+            (area.x + area.width - (bounds.x + bounds.width)).abs(),
+        ),
+        (SnapEdge::Top, (bounds.y - area.y).abs()),
+        (
+            SnapEdge::Bottom,
+            (area.y + area.height - (bounds.y + bounds.height)).abs(),
+        ),
+    ];
+    distances
+        .into_iter()
+        .min_by(|(_, left), (_, right)| {
+            left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(edge, _)| edge)
+        .unwrap_or(SnapEdge::Right)
+}
+
+fn should_use_drawer(state: &State<RuntimeState>) -> bool {
+    state
+        .inner
+        .lock()
+        .map(|runtime| runtime.drawer_enabled)
+        .unwrap_or(false)
+}
+
+fn is_drawer_collapsed(state: &State<RuntimeState>) -> bool {
+    state
+        .inner
+        .lock()
+        .map(|runtime| runtime.drawer_enabled && runtime.drawer_collapsed)
+        .unwrap_or(false)
+}
+
+fn set_drawer_collapsed_for_window(
+    window: &Window,
+    state: &State<RuntimeState>,
+    collapsed: bool,
+) -> Result<(), String> {
+    let current_bounds = get_window_bounds(window)?;
+    let work_area = get_work_area(window)?;
+    let target_bounds = resolve_drawer_target_bounds(state, current_bounds, work_area, collapsed)?;
+    if !collapsed {
+        window.show().map_err(|error| error.to_string())?;
+    }
+    animate_bounds(window, state, current_bounds, target_bounds)?;
+    if !collapsed {
+        window.set_focus().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn set_drawer_collapsed_for_webview(
+    window: &WebviewWindow,
+    state: &State<RuntimeState>,
+    collapsed: bool,
+) -> Result<(), String> {
+    let current_bounds = get_webview_window_bounds(window)?;
+    let work_area = get_webview_work_area(window)?;
+    let target_bounds = resolve_drawer_target_bounds(state, current_bounds, work_area, collapsed)?;
+    if !collapsed {
+        window.show().map_err(|error| error.to_string())?;
+    }
+    animate_webview_bounds(window, state, current_bounds, target_bounds)?;
+    if !collapsed {
+        window.set_focus().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn resolve_drawer_target_bounds(
+    state: &State<RuntimeState>,
+    current_bounds: WindowBounds,
+    work_area: WorkArea,
+    collapsed: bool,
+) -> Result<WindowBounds, String> {
+    let (configured_edge, previous_edge) = {
+        let runtime = state
+            .inner
+            .lock()
+            .map_err(|_| "failed to lock runtime state".to_string())?;
+        (runtime.drawer_edge, runtime.drawer_resolved_edge)
+    };
+    let edge = if collapsed {
+        resolve_drawer_edge(configured_edge, current_bounds, work_area)
+    } else if configured_edge == SnapEdge::Auto {
+        previous_edge
+    } else {
+        configured_edge
+    };
+    let expanded = get_drawer_expanded_bounds(work_area, edge, current_bounds);
+    let target = if collapsed {
+        get_drawer_collapsed_bounds(work_area, edge, expanded)
+    } else {
+        expanded
+    };
+
+    if let Ok(mut runtime) = state.inner.lock() {
+        runtime.drawer_collapsed = collapsed;
+        runtime.drawer_resolved_edge = edge;
+        runtime.snapped_x = None;
+        runtime.snapped_y = None;
+    }
+
+    Ok(target)
+}
+
 fn clamp_bounds(bounds: WindowBounds, area: WorkArea) -> WindowBounds {
     let width = bounds.width.clamp(MIN_WIDTH, area.width);
     let height = bounds.height.clamp(MIN_HEIGHT, area.height);
@@ -1344,24 +1784,58 @@ fn split_path_and_args(value: &str) -> Option<(String, Option<String>)> {
     None
 }
 
-fn start_process_with_arguments(file_path: &str, args: &str) -> Result<(), String> {
-    let status = Command::new(power_shell_path())
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Start-Process -FilePath $args[0] -ArgumentList $args[1]",
-            file_path,
-            args,
-        ])
+#[cfg(target_os = "windows")]
+fn launch_target_with_arguments(file_path: &str, args: &str) -> Result<(), String> {
+    launch_target_with_verb("open", file_path, args)
+}
+
+#[cfg(target_os = "windows")]
+fn launch_target_with_verb(verb: &str, file_path: &str, args: &str) -> Result<(), String> {
+    let operation = encode_wide_null(verb);
+    let file_path = encode_wide_null(file_path);
+    let arguments = encode_wide_null(args);
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(operation.as_ptr()),
+            PCWSTR(file_path.as_ptr()),
+            PCWSTR(arguments.as_ptr()),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+
+    if (result.0 as isize) > 32 {
+        Ok(())
+    } else {
+        Err(format!(
+            "failed to launch target with arguments: ShellExecuteW returned {}",
+            result.0 as isize
+        ))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn launch_target_with_arguments(file_path: &str, args: &str) -> Result<(), String> {
+    let status = std::process::Command::new(file_path)
+        .args(args.split_whitespace())
         .status()
         .map_err(|error| error.to_string())?;
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err("failed to launch target with arguments".to_string())
-    }
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "failed to launch target with arguments".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn launch_target_with_verb(_verb: &str, file_path: &str, args: &str) -> Result<(), String> {
+    launch_target_with_arguments(file_path, args)
+}
+
+#[cfg(target_os = "windows")]
+fn encode_wide_null(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(iter::once(0)).collect()
 }
 
 fn resolve_dropped_path(path: &Path) -> Result<Option<ResolvedShortcut>, String> {
@@ -1840,15 +2314,6 @@ fn push_favicon_suggestions(
     }
 }
 
-fn power_shell_path() -> PathBuf {
-    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
-    PathBuf::from(system_root)
-        .join("System32")
-        .join("WindowsPowerShell")
-        .join("v1.0")
-        .join("powershell.exe")
-}
-
 fn query_initials(query: &str) -> String {
     let mut initials = String::new();
     for part in query
@@ -2267,5 +2732,62 @@ mod tests {
             get_edge_docked_bounds(area, SnapEdge::Bottom, 300.0, 500.0).y,
             220.0
         );
+    }
+
+    #[test]
+    fn drawer_collapsed_bounds_keep_handle_visible() {
+        let area = WorkArea {
+            x: 10.0,
+            y: 20.0,
+            width: 1000.0,
+            height: 700.0,
+        };
+        let expanded = WindowBounds {
+            x: 710.0,
+            y: 20.0,
+            width: 300.0,
+            height: 500.0,
+        };
+
+        assert_eq!(
+            get_drawer_collapsed_bounds(area, SnapEdge::Left, expanded).x,
+            10.0 - 300.0 + DRAWER_HANDLE_SIZE
+        );
+        assert_eq!(
+            get_drawer_collapsed_bounds(area, SnapEdge::Right, expanded).x,
+            10.0 + 1000.0 - DRAWER_HANDLE_SIZE
+        );
+        assert_eq!(
+            get_drawer_collapsed_bounds(area, SnapEdge::Top, expanded).y,
+            20.0 - 500.0 + DRAWER_HANDLE_SIZE
+        );
+        assert_eq!(
+            get_drawer_collapsed_bounds(area, SnapEdge::Bottom, expanded).y,
+            20.0 + 700.0 - DRAWER_HANDLE_SIZE
+        );
+    }
+
+    #[test]
+    fn drawer_expanded_bounds_keep_cross_axis_position() {
+        let area = WorkArea {
+            x: 0.0,
+            y: 0.0,
+            width: 1200.0,
+            height: 800.0,
+        };
+        let current = WindowBounds {
+            x: 940.0,
+            y: 180.0,
+            width: 320.0,
+            height: 500.0,
+        };
+
+        let right = get_drawer_expanded_bounds(area, SnapEdge::Right, current);
+        assert_eq!(right.x, 880.0);
+        assert_eq!(right.y, 180.0);
+
+        let left = get_drawer_expanded_bounds(area, SnapEdge::Left, current);
+        assert_eq!(left.x, 0.0);
+        assert_eq!(left.y, 180.0);
     }
 }

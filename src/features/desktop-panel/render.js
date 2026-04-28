@@ -67,6 +67,7 @@ export function registerRenderFeature(app) {
     app.refs.appShell.dataset.flow = app.store.state.layout.flowDirection === "rtl" ? "rtl" : "ltr";
     app.refs.appShell.dataset.showLabels = app.store.state.layout.showItemLabel === false ? "false" : "true";
     app.refs.appShell.dataset.theme = app.store.state.layout.theme || "aurora";
+    app.syncDrawerHandle?.();
     updateTrackCountHint();
   }
 

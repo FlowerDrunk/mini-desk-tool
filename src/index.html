@@ -11,6 +11,7 @@
 <body>
   <div class="app-shell" id="appShell">
     <div class="window-drag-band" id="windowDragBand" aria-hidden="true"></div>
+    <button id="drawerHandle" class="drawer-handle no-drag" type="button" aria-label="展开面板" hidden></button>
 
     <main class="workspace" id="workspace">
       <section class="quick-panel no-drag" aria-label="快捷查找">
@@ -272,57 +273,117 @@
       </section>
 
       <section class="settings-section" data-settings-section="window">
-        <h3>窗口行为</h3>
+        <h3>窗口行为 <span class="section-badge">实验功能</span></h3>
+        <p class="section-note">这些设置会影响窗口停靠、自动隐藏、边缘收起和全局快捷键表现；不同系统缩放或多屏环境下可能需要微调。</p>
 
-        <label class="checkbox">
-          <input id="snapEdgeInput" name="snapEdge" type="checkbox" />
-          窗口边缘吸附
-        </label>
+        <div class="settings-subsection">
+          <div class="settings-subsection-head">
+            <strong>基础行为</strong>
+            <span>启动与隐藏</span>
+          </div>
 
-        <label class="checkbox">
-          <input id="launchAtLoginInput" name="launchAtLogin" type="checkbox" />
-          开机启动
-        </label>
+          <label class="checkbox">
+            <input id="launchAtLoginInput" name="launchAtLogin" type="checkbox" />
+            开机启动
+          </label>
 
-        <label class="checkbox">
-          <input id="autoHideOnBlurInput" name="autoHideOnBlur" type="checkbox" />
-          失焦自动隐藏
-        </label>
-        <p class="field-hint">实验功能：切换到其他窗口时隐藏面板，可用托盘或快捷键唤回。</p>
+          <label class="checkbox">
+            <input id="autoHideOnBlurInput" name="autoHideOnBlur" type="checkbox" />
+            失焦自动隐藏
+          </label>
+          <p class="field-hint">切换到其他窗口时隐藏面板，可用托盘或快捷键唤回。</p>
+        </div>
 
-        <label>
-          吸附边缘
-          <select id="snapEdgeSelect" name="snapEdge">
-            <option value="auto">自动</option>
-            <option value="left">左侧</option>
-            <option value="right">右侧</option>
-            <option value="top">顶部</option>
-            <option value="bottom">底部</option>
-          </select>
-        </label>
+        <div class="settings-subsection">
+          <div class="settings-subsection-head">
+            <strong>吸附与唤出</strong>
+            <span>靠近边缘时对齐窗口</span>
+          </div>
 
-        <label>
-          吸附距离
-          <input id="snapDistanceInput" name="snapDistance" type="range" min="4" max="64" step="2" />
-        </label>
-        <p id="snapDistanceHint" class="field-hint">当前吸附距离 14 px。</p>
+          <label class="checkbox">
+            <input id="snapEdgeInput" name="snapEdge" type="checkbox" />
+            窗口边缘吸附
+          </label>
 
-        <label>
-          唤出延迟
-          <input id="revealDelayInput" name="revealDelay" type="range" min="0" max="1500" step="50" />
-        </label>
-        <p id="revealDelayHint" class="field-hint">当前唤出延迟 250 ms。</p>
+          <label>
+            吸附边缘
+            <select id="snapEdgeSelect" name="snapEdge">
+              <option value="auto">自动</option>
+              <option value="left">左侧</option>
+              <option value="right">右侧</option>
+              <option value="top">顶部</option>
+              <option value="bottom">底部</option>
+            </select>
+          </label>
 
-        <label class="checkbox">
-          <input id="globalShortcutEnabledInput" name="globalShortcutEnabled" type="checkbox" />
-          全局快捷键
-        </label>
+          <label>
+            吸附距离
+            <input id="snapDistanceInput" name="snapDistance" type="range" min="4" max="64" step="2" />
+          </label>
+          <p id="snapDistanceHint" class="field-hint">当前吸附距离 14 px。</p>
 
-        <label>
-          快捷键
-          <input id="globalShortcutInput" name="globalShortcut" type="text" maxlength="40" placeholder="点击后按下快捷键" readonly />
-        </label>
-        <p id="globalShortcutStatus" class="field-hint">点击输入框后按下组合键，Esc 恢复默认，Backspace 清空。</p>
+          <label>
+            边缘唤出延迟
+            <input id="revealDelayInput" name="revealDelay" type="range" min="0" max="1500" step="50" />
+          </label>
+          <p id="revealDelayHint" class="field-hint">当前唤出延迟 250 ms。</p>
+        </div>
+
+        <div class="settings-subsection">
+          <div class="settings-subsection-head">
+            <strong>边缘收起模式</strong>
+            <span>不用时收成窄把手</span>
+          </div>
+
+          <label class="checkbox">
+            <input id="drawerModeEnabledInput" name="drawerModeEnabled" type="checkbox" />
+            启用边缘收起
+          </label>
+          <p class="field-hint">开启后，面板会贴到屏幕边缘，只保留一条窄把手；需要时 hover 或点击把手展开。</p>
+
+          <label>
+            收起位置
+            <select id="drawerEdgeSelect" name="drawerEdge">
+              <option value="auto">自动跟随当前边缘</option>
+              <option value="left">左侧</option>
+              <option value="right">右侧</option>
+              <option value="top">顶部</option>
+              <option value="bottom">底部</option>
+            </select>
+          </label>
+
+          <label>
+            唤出方式
+            <select id="drawerTriggerSelect" name="drawerTrigger">
+              <option value="hover-click">鼠标悬停或点击</option>
+              <option value="click">仅点击把手</option>
+            </select>
+          </label>
+
+          <label>
+            离开后收起
+            <input id="drawerDelayInput" name="drawerDelay" type="range" min="0" max="5000" step="100" />
+          </label>
+          <p id="drawerModeHint" class="field-hint">边缘收起默认关闭。</p>
+        </div>
+
+        <div class="settings-subsection">
+          <div class="settings-subsection-head">
+            <strong>全局快捷键</strong>
+            <span>键盘快速显示/隐藏</span>
+          </div>
+
+          <label class="checkbox">
+            <input id="globalShortcutEnabledInput" name="globalShortcutEnabled" type="checkbox" />
+            启用全局快捷键
+          </label>
+
+          <label>
+            快捷键
+            <input id="globalShortcutInput" name="globalShortcut" type="text" maxlength="40" placeholder="点击后按下快捷键" readonly />
+          </label>
+          <p id="globalShortcutStatus" class="field-hint">点击输入框后按下组合键，Esc 恢复默认，Backspace 清空。</p>
+        </div>
       </section>
 
       <section class="settings-section" data-settings-section="backup">
@@ -452,6 +513,12 @@
     <button type="button" data-action="edit-item"><span>编辑图标</span></button>
     <button type="button" data-action="duplicate-item"><span>复制一个</span></button>
     <div class="menu-divider" role="separator"></div>
+    <button type="button" data-action="copy-target" data-action-type="all"><span>复制链接/路径</span></button>
+    <button type="button" data-action="copy-keyword" data-action-type="all"><span>复制搜索关键词</span></button>
+    <button type="button" data-action="open-browser" data-action-type="web"><span>在浏览器中打开</span></button>
+    <button type="button" data-action="open-folder" data-action-type="local"><span>打开所在文件夹</span></button>
+    <button type="button" data-action="open-admin" data-action-type="admin"><span>以管理员身份打开</span></button>
+    <div class="menu-divider" data-action-type="quick" role="separator"></div>
     <button type="button" data-action="delete-item" class="danger"><span>删除</span></button>
   </div>
 

@@ -1,151 +1,91 @@
 # Mini Desk Tool
 
-[简体中文（推荐）](./README.zh-CN.md) | [English](./README.md)
+Mini Desk Tool 是一个基于 Tauri 的 Windows 桌面悬浮启动面板。它面向常用网站、本地文件、文件夹、应用程序和快捷方式管理，让桌面边缘成为一个轻量、可整理、可快速唤出的 Launchpad。
+![Tauri](https://img.shields.io/badge/Tauri-2.x-24C8DB)
+![Version](https://img.shields.io/badge/version-1.2.1-6B7CFF)
 
-Chinese documentation is the primary reference for this project. If you read Chinese, please use [`README.zh-CN.md`](./README.zh-CN.md) first.
+## 特性
 
-Mini Desk Tool is a lightweight Tauri desktop panel for Windows. It stays attached to the desktop, keeps a compact floating footprint, and lets you organize website links, local files, folders, apps, and shortcuts into tidy groups.
+- 图标管理：支持网站、本地文件、文件夹、应用、`.lnk` 快捷方式和拖拽导入。
+- 桌面悬浮面板：支持窗口边缘吸附、最小宽度 300px、面板宽度和图标布局调整。
+- 分组布局：支持分组、折叠分组、空分组保留、排列方向、每排数量和不同图标尺寸。
+- 搜索与最近打开：支持名称、描述、网址、路径、分组匹配；搜索栏可选择搜索引擎并用 Enter 调用外部搜索。
+- 批量管理：支持长按进入多选、全选当前分组、全选全部、批量移动、批量调整大小和批量删除。
+- 图标体验：支持系统原生图标、自定义图标、Iconfont 候选图标、网站 favicon 和快捷方式图标回退。
+- 快捷动作：右键菜单支持复制链接/路径、复制搜索关键词、浏览器打开、打开所在文件夹、管理员身份打开。
+- 窗口行为：支持边缘吸附、失焦自动隐藏、边缘唤出、全局显示/隐藏快捷键和边缘收起模式。
+- 个性化：支持多配置文件、布局预设、主题、自定义主题、字体、文字颜色、透明度和显示项开关。
+- 数据安全：支持导入/导出、手动备份、自动备份、导入前恢复点和问题提示中心。
+- 设置体验：设置项按功能分组，提供顶部分类导航，支持 Esc 关闭设置、添加、编辑弹窗和右键菜单。
 
-## Features
+## 安装与使用
 
-- Desktop floating panel with native edge snapping.
-- Grouped icon layout with configurable flow direction and track count.
-- Configurable panel width with a 300 px minimum window width.
-- Add website links from the panel UI or the context menu.
-- Edit title, description, link or path, tile size, group, and icon source.
-- Drag files, folders, apps, and `.lnk` shortcuts directly into the panel.
-- Open local files, folders, apps, and web links from one launcher surface.
-- Export and import panel data from the settings dialog.
-- Prefer Windows-native icons for imported local entries.
-- Icon suggestions from Iconfont with batch refresh.
-- Original icon fallback for website links and imported Windows shortcuts.
-- Automatic grouping based on title, description, and hostname.
-- Launch at login option in the settings dialog.
-- Window behavior settings for auto-hide, edge reveal, snap edge, snap distance, reveal delay, and a global show/hide shortcut.
-- Backup and recovery settings with manual backups, automatic backups, import restore points, and an issue center.
-- Personalization settings for profiles, layout presets, themes, and panel transparency.
-- Search bar engine selector with Enter-to-search support.
+目前项目主要面向 Windows 桌面环境。发布版通常以 NSIS 安装包形式提供。
 
-## v1.2.0
-
-- Added profile switching for different icon/group/layout scenarios.
-- Added "copy current as new profile" and profile renaming in settings.
-- Added Compact, Standard, Wide, and Custom layout presets.
-- Added more visible theme selection and panel transparency control.
-- Added search engine selection in the search bar and settings.
-- Reorganized settings into profile, appearance/layout, display/search, window behavior, backup, and data sections.
-- Kept machine-level settings such as backup directory, window behavior, and global shortcut outside profiles.
-- Improved the search engine dropdown, search clear button, and recent-opened icon sizing.
-- Updated the optimization roadmap so completed work maps to v1.1.2-v1.1.6 and future plans start at v1.2.1.
-
-## v1.1.6
-
-- Added a Backup & Recovery section in settings.
-- Added backup directory selection, backup retention, and manual backup.
-- Added delayed automatic backups after data changes when backup is enabled.
-- Added import-time restore points and a restore-before-import action.
-- Added an issue center for import, export, backup, and recovery failures.
-
-## v1.1.5
-
-- Added a Window Behavior section in settings.
-- Added an experimental blur auto-hide option.
-- Added edge reveal after auto-hide with monitor-aware work-area detection.
-- Added snap edge, snap distance, and reveal delay settings.
-- Added a configurable global show/hide shortcut powered by Tauri's global shortcut plugin.
-- Added clear shortcut registration status when registration fails or is disabled.
-
-## v1.1.4
-
-- Added bulk import from Desktop and Start Menu shortcuts.
-- Added multi-select for launcher items.
-- Added batch move, resize, delete, and clear-selection actions.
-- Added native shortcut location scanning in the Tauri backend.
-
-## v1.1.3
-
-- Added a top search box for filtering by title, description, URL, path, and group name.
-- Added recent opened items so frequently used entries resurface automatically.
-- Added collapsible groups with persisted collapsed state.
-- Improved drag feedback for empty drop targets.
-
-## v1.1.0
-
-- Fixed native window drag edge snapping so the panel snaps after the window stops moving.
-- Fixed window geometry calculations on Windows display scaling by using logical coordinates consistently.
-- Fixed panel resize behavior when changing width while docked to the left or right edge.
-- Raised the minimum window width to 300 px across the UI, Tauri config, and runtime bounds.
-
-## Tech Stack
-
-- Tauri 2
-- Vite
-- Plain HTML / CSS / JavaScript
-- Rust backend commands for native shell, window, tray, and shortcut handling
-
-## Requirements
-
-- Windows
-- Node.js 18+
-- Rust toolchain
-
-## Getting Started
+本地开发：
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Build
+构建安装包：
 
 ```bash
 npm run build
 ```
 
-The Windows installer is generated at:
+构建产物位于：
 
 ```text
 src-tauri/target/release/bundle/nsis/
 ```
 
-## Current Behaviors
+## 重大版本演进
 
-- Official-site lookup auto-runs only when creating an icon from the right-click menu.
-- Editing an existing item does not auto-rewrite the link.
-- Imported local entries are added immediately.
-- Imported web shortcuts can continue icon enrichment in the background when needed.
-- Icon recommendation refresh has a 3-second cooldown.
+### v1.2.x：个性化、设置重构与窗口体验
 
-## Project Structure
+v1.2 系列重点提升长期使用体验：新增多配置文件、布局预设、主题/字体/颜色设置、设置页分类导航、统一 Esc 关闭行为、搜索引擎选择、右键快捷动作，以及实验性的边缘收起模式。
+
+### v1.1.x：搜索、批量管理、备份与窗口行为
+
+v1.1 系列让面板从基础启动器升级为可维护的桌面工具：加入搜索、最近打开、分组折叠、批量导入、批量工具条、窗口吸附设置、自动隐藏、全局快捷键、备份恢复和问题提示中心。
+
+### v1.0.x：基础桌面启动面板
+
+v1.0 系列建立核心形态：桌面悬浮面板、图标分组、添加/编辑/删除图标、打开网站与本地路径、导入导出数据，并完成 Windows 窗口吸附、缩放坐标和最小窗口宽度等基础稳定性修复。
+
+## 技术栈
+
+- Tauri 2
+- Rust
+- Vite
+- 原生 HTML / CSS / JavaScript
+- Playwright
+
+## 项目结构
 
 ```text
 .
-|-- src/
-|   |-- index.html
-|   |-- main.js
-|   |-- desktop-panel.js
-|   `-- features/
-|-- src-tauri/
-|   |-- src/
-|   |-- icons/
-|   `-- tauri.conf.json
-|-- tests/
-|-- scripts/
-|-- renderer-dist/
-|-- vite.config.js
-`-- package.json
+|-- src/                    # Renderer UI and feature modules
+|-- src-tauri/              # Tauri app, Rust commands, native window logic
+|-- tests/                  # Playwright tests
+|-- scripts/                # Local development/build helpers
+|-- renderer-dist/          # Renderer build output
+|-- package.json
+`-- vite.config.js
 ```
 
-## Scripts
+## 常用脚本
 
-- `npm run dev` - start the Tauri development app.
-- `npm run dev:web` - start the Vite renderer only.
-- `npm run build:renderer` - build the Vite renderer into `renderer-dist/`.
-- `npm run build` - build the renderer and package the Windows installer.
-- `npm run test:e2e` - run Playwright tests.
+- `npm run dev`：启动 Tauri 开发应用。
+- `npm run dev:web`：仅启动 Vite renderer。
+- `npm run build:renderer`：构建前端资源到 `renderer-dist/`。
+- `npm run build`：构建 renderer 并打包 Windows 安装包。
+- `npm run test:e2e`：运行 Playwright 测试。
 
-## Notes
+## 说明
 
-- This project is currently optimized for Windows desktop usage.
-- Packaged builds are generated as an NSIS installer.
-- Some legacy UI strings in the repository still need a broader encoding cleanup pass.
+- 当前主要优化目标是 Windows 桌面使用体验。
+- 边缘收起、自动隐藏、边缘唤出和全局快捷键属于窗口行为实验功能，在多显示器或不同缩放比例下仍会持续优化。
+- 后续功能计划见 [OPTIMIZATION_ROADMAP.md](./OPTIMIZATION_ROADMAP.md)。

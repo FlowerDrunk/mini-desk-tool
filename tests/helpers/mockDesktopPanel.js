@@ -8,7 +8,10 @@
       autoHideEnabled: false,
       snapEdge: "auto",
       snapDistance: 14,
-      revealDelayMs: 250
+      revealDelayMs: 250,
+      drawerEnabled: false,
+      drawerEdge: "auto",
+      drawerDelayMs: 450
     },
     importResult: { canceled: true },
     exportResult: { canceled: false, filePath: "C:\\exports\\desktop-panel-backup.json" },
@@ -28,12 +31,15 @@
       exportStateFile: [],
       getLaunchAtLogin: [],
       importStateFile: [],
+      openAsAdmin: [],
+      openContainingFolder: [],
       openUrl: [],
       resolveDroppedPaths: [],
       scanShortcutLocations: [],
       searchIconSuggestions: [],
       searchOfficialUrl: [],
       setDropAccepting: [],
+      setDrawerCollapsed: [],
       setLaunchAtLogin: [],
       setSnapEnabled: [],
       setWindowSize: [],
@@ -125,7 +131,10 @@
         autoHideEnabled: Boolean(options?.autoHideEnabled),
         snapEdge: String(options?.snapEdge || "auto"),
         snapDistance: Number(options?.snapDistance || 14),
-        revealDelayMs: Number(options?.revealDelayMs || 250)
+        revealDelayMs: Number(options?.revealDelayMs || 250),
+        drawerEnabled: Boolean(options?.drawerEnabled),
+        drawerEdge: String(options?.drawerEdge || "auto"),
+        drawerDelayMs: Number(options?.drawerDelayMs || 450)
       };
       state.calls.configureWindowBehavior.push({ ...state.windowBehavior });
       return Promise.resolve();
@@ -148,6 +157,14 @@
     },
     openUrl(url) {
       state.calls.openUrl.push(String(url || ""));
+      return Promise.resolve();
+    },
+    openContainingFolder(target) {
+      state.calls.openContainingFolder.push(String(target || ""));
+      return Promise.resolve();
+    },
+    openAsAdmin(target) {
+      state.calls.openAsAdmin.push(String(target || ""));
       return Promise.resolve();
     },
     resolveDroppedPaths(filePaths) {
@@ -178,6 +195,10 @@
     },
     setDropAccepting(accepting) {
       state.calls.setDropAccepting.push(Boolean(accepting));
+      return Promise.resolve();
+    },
+    setDrawerCollapsed(collapsed) {
+      state.calls.setDrawerCollapsed.push(Boolean(collapsed));
       return Promise.resolve();
     },
     setLaunchAtLogin(enabled) {

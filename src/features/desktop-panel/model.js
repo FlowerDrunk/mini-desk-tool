@@ -13,6 +13,8 @@ export const SNAP_DISTANCE_MIN = 4;
 export const SNAP_DISTANCE_MAX = 64;
 export const REVEAL_DELAY_MIN = 0;
 export const REVEAL_DELAY_MAX = 1500;
+export const DRAWER_DELAY_MIN = 0;
+export const DRAWER_DELAY_MAX = 5000;
 export const BACKUP_RETENTION_MIN = 1;
 export const BACKUP_RETENTION_MAX = 12;
 export const PANEL_OPACITY_MIN = 58;
@@ -92,6 +94,10 @@ export function createDefaultState() {
       snapEdge: "auto",
       snapDistance: 14,
       revealDelay: 250,
+      drawerModeEnabled: false,
+      drawerEdge: "auto",
+      drawerCollapseDelay: 450,
+      drawerTrigger: "hover-click",
       globalShortcutEnabled: false,
       globalShortcut: DEFAULT_GLOBAL_SHORTCUT,
       autoBackupEnabled: false,
@@ -212,6 +218,11 @@ export function sanitizeShortcut(value) {
 export function sanitizeSnapEdge(value) {
   const edge = String(value || "").trim().toLowerCase();
   return ["auto", "left", "right", "top", "bottom"].includes(edge) ? edge : "auto";
+}
+
+export function sanitizeDrawerTrigger(value) {
+  const trigger = String(value || "").trim().toLowerCase();
+  return ["hover-click", "click"].includes(trigger) ? trigger : "hover-click";
 }
 
 export function sanitizeLayoutPreset(value) {
@@ -436,6 +447,10 @@ function hydrateAppConfig(input) {
     snapEdge: sanitizeSnapEdge(input?.snapEdge),
     snapDistance: clampNumber(input?.snapDistance, SNAP_DISTANCE_MIN, SNAP_DISTANCE_MAX, 14),
     revealDelay: clampNumber(input?.revealDelay, REVEAL_DELAY_MIN, REVEAL_DELAY_MAX, 250),
+    drawerModeEnabled: input?.drawerModeEnabled === true,
+    drawerEdge: sanitizeSnapEdge(input?.drawerEdge),
+    drawerCollapseDelay: clampNumber(input?.drawerCollapseDelay, DRAWER_DELAY_MIN, DRAWER_DELAY_MAX, 450),
+    drawerTrigger: sanitizeDrawerTrigger(input?.drawerTrigger),
     globalShortcutEnabled: input?.globalShortcutEnabled === true,
     globalShortcut: sanitizeShortcut(input?.globalShortcut || DEFAULT_GLOBAL_SHORTCUT),
     autoBackupEnabled: input?.autoBackupEnabled === true,

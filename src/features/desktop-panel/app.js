@@ -116,6 +116,7 @@ export function createDesktopPanelApp({ desktopPanel = window.desktopPanel } = {
       );
       app.desktopPanel?.setSnapEnabled?.(app.store.state.app.snapToEdge);
       void app.syncWindowBehavior?.();
+      app.syncDrawerHandle?.();
       app.render();
       app.bindEvents();
       app.bindDragBand();
@@ -130,6 +131,7 @@ export function createDesktopPanelApp({ desktopPanel = window.desktopPanel } = {
 function createRefs() {
   return {
     appShell: document.querySelector("#appShell"),
+    drawerHandle: document.querySelector("#drawerHandle"),
     windowDragBand: document.querySelector("#windowDragBand"),
     workspace: document.querySelector("#workspace"),
     searchInput: document.querySelector("#searchInput"),
@@ -196,6 +198,11 @@ function createRefs() {
     snapDistanceHint: document.querySelector("#snapDistanceHint"),
     revealDelayInput: document.querySelector("#revealDelayInput"),
     revealDelayHint: document.querySelector("#revealDelayHint"),
+    drawerModeEnabledInput: document.querySelector("#drawerModeEnabledInput"),
+    drawerEdgeSelect: document.querySelector("#drawerEdgeSelect"),
+    drawerDelayInput: document.querySelector("#drawerDelayInput"),
+    drawerTriggerSelect: document.querySelector("#drawerTriggerSelect"),
+    drawerModeHint: document.querySelector("#drawerModeHint"),
     globalShortcutEnabledInput: document.querySelector("#globalShortcutEnabledInput"),
     globalShortcutInput: document.querySelector("#globalShortcutInput"),
     globalShortcutStatus: document.querySelector("#globalShortcutStatus"),

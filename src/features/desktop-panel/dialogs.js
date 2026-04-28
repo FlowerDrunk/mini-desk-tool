@@ -8,6 +8,8 @@ import {
   DEFAULT_GLOBAL_SHORTCUT,
   DEFAULT_GROUP_ID,
   DEFAULT_TEXT_COLOR,
+  DRAWER_DELAY_MAX,
+  DRAWER_DELAY_MIN,
   extractImportedState,
   findItem,
   getFontConfig,
@@ -25,6 +27,7 @@ import {
   sanitizeColor,
   sanitizeFontFamily,
   sanitizeSearchEngine,
+  sanitizeDrawerTrigger,
   sanitizeSnapEdge,
   sanitizeShortcut,
   sanitizeTheme,
@@ -37,6 +40,7 @@ import {
   WINDOW_WIDTH_MAX,
   WINDOW_WIDTH_MIN
 } from "./model.js";
+import { keyboardEventToShortcut } from "./keyboard-shortcuts.js";
 
 export function registerDialogFeature(app) {
   const saveStateNow = app.saveState;
@@ -60,10 +64,12 @@ export function registerDialogFeature(app) {
   app.openSettings = openSettings;
   app.syncWindowBehavior = syncWindowBehavior;
   app.hideMenus = hideMenus;
+  app.hasVisibleMenu = hasVisibleMenu;
   app.openMenu = openMenu;
   app.shouldAutoSearchOfficialLink = shouldAutoSearchOfficialLink;
   app.removeItem = removeItem;
   app.autoGroupByContent = autoGroupByContent;
+  app.hasOpenDialog = hasOpenDialog;
 
   async function exportDataToFile() {
     try {
@@ -299,18 +305,21 @@ export function registerDialogFeature(app) {
       });
     });
 
-    app.refs.workspace.addEventListener("contextmenu", (event) => {
+    document.addEventListener("contextmenu", (event) => {
       event.preventDefault();
+      event.stopPropagation();
+      if (event.target.closest(".context-menu")) return;
       const tile = event.target.closest(".tile");
       hideMenus();
       if (tile) {
         if (tile.dataset.recentOnly === "true") return;
         app.runtime.activeItemContext = { groupId: tile.dataset.groupId, itemId: tile.dataset.itemId };
+        updateItemActionMenu(app.findItem(tile.dataset.groupId, tile.dataset.itemId));
         openMenu(app.refs.itemContextMenu, event.clientX, event.clientY);
         return;
       }
       openMenu(app.refs.appContextMenu, event.clientX, event.clientY);
-    });
+    }, true);
 
     app.refs.workspace.addEventListener("dblclick", (event) => {
       const title = event.target.closest(".group-title");
@@ -336,6 +345,10 @@ export function registerDialogFeature(app) {
 
     window.addEventListener("blur", () => {
       hideMenus();
+      if (app.store.state.app.drawerModeEnabled && !hasOpenDialog()) {
+        app.scheduleDrawerCollapse?.({ immediate: true });
+        return;
+      }
       if (app.store.state.app.autoHideOnBlur && !hasOpenDialog()) {
         void app.desktopPanel?.closeWindow?.();
       }
@@ -370,6 +383,39 @@ export function registerDialogFeature(app) {
         group.items.splice(index + 1, 0, { ...structuredClone(item), id: crypto.randomUUID() });
         app.saveState();
         app.render();
+        return;
+      }
+
+      if (action === "copy-target") {
+        void copyTextAction(item.url, "已复制链接/路径", "复制链接/路径失败");
+        return;
+      }
+
+      if (action === "copy-keyword") {
+        void copyTextAction(item.title || item.description || item.url, "已复制搜索关键词", "复制搜索关键词失败");
+        return;
+      }
+
+      if (action === "open-browser") {
+        app.openUrl(item.url);
+        return;
+      }
+
+      if (action === "open-folder") {
+        void runDesktopAction(
+          () => app.desktopPanel?.openContainingFolder?.(item.url),
+          "已打开所在文件夹",
+          "打开所在文件夹失败"
+        );
+        return;
+      }
+
+      if (action === "open-admin") {
+        void runDesktopAction(
+          () => app.desktopPanel?.openAsAdmin?.(item.url),
+          "已请求管理员身份打开",
+          "以管理员身份打开失败"
+        );
         return;
       }
 
@@ -505,6 +551,40 @@ export function registerDialogFeature(app) {
       );
       updateWindowBehaviorHints();
       app.saveState();
+      void syncNativeWindowBehavior();
+    });
+
+    app.refs.drawerModeEnabledInput?.addEventListener("change", () => {
+      app.store.state.app.drawerModeEnabled = app.refs.drawerModeEnabledInput.checked;
+      app.saveState();
+      app.syncDrawerHandle?.();
+      void syncNativeWindowBehavior();
+    });
+
+    app.refs.drawerEdgeSelect?.addEventListener("change", () => {
+      app.store.state.app.drawerEdge = sanitizeSnapEdge(app.refs.drawerEdgeSelect.value);
+      app.saveState();
+      updateWindowBehaviorHints();
+      app.syncDrawerHandle?.();
+      void syncNativeWindowBehavior();
+    });
+
+    app.refs.drawerTriggerSelect?.addEventListener("change", () => {
+      app.store.state.app.drawerTrigger = sanitizeDrawerTrigger(app.refs.drawerTriggerSelect.value);
+      app.saveState();
+      updateWindowBehaviorHints();
+      app.syncDrawerHandle?.();
+    });
+
+    app.refs.drawerDelayInput?.addEventListener("input", () => {
+      app.store.state.app.drawerCollapseDelay = clampNumber(
+        Number(app.refs.drawerDelayInput.value),
+        DRAWER_DELAY_MIN,
+        DRAWER_DELAY_MAX,
+        450
+      );
+      app.saveState();
+      updateWindowBehaviorHints();
       void syncNativeWindowBehavior();
     });
 
@@ -955,7 +1035,20 @@ export function registerDialogFeature(app) {
     if (app.refs.revealDelayInput) {
       app.refs.revealDelayInput.value = String(app.store.state.app.revealDelay || 250);
     }
+    if (app.refs.drawerModeEnabledInput) {
+      app.refs.drawerModeEnabledInput.checked = !!app.store.state.app.drawerModeEnabled;
+    }
+    if (app.refs.drawerEdgeSelect) {
+      app.refs.drawerEdgeSelect.value = sanitizeSnapEdge(app.store.state.app.drawerEdge);
+    }
+    if (app.refs.drawerTriggerSelect) {
+      app.refs.drawerTriggerSelect.value = sanitizeDrawerTrigger(app.store.state.app.drawerTrigger);
+    }
+    if (app.refs.drawerDelayInput) {
+      app.refs.drawerDelayInput.value = String(app.store.state.app.drawerCollapseDelay || 450);
+    }
     updateWindowBehaviorHints();
+    app.syncDrawerHandle?.();
     if (app.refs.globalShortcutEnabledInput) {
       app.refs.globalShortcutEnabledInput.checked = !!app.store.state.app.globalShortcutEnabled;
     }
@@ -1014,8 +1107,8 @@ export function registerDialogFeature(app) {
       return;
     }
 
-    const shortcut = shortcutFromKeyboardEvent(event);
-    if (!shortcut) {
+    const rawShortcut = keyboardEventToShortcut(event);
+    if (!rawShortcut) {
       app.runtime.shortcutEscapeArmed = false;
       if (app.refs.globalShortcutStatus) {
         app.refs.globalShortcutStatus.textContent = "请继续按下一个非修饰键，例如 Ctrl+Alt+Space。";
@@ -1023,6 +1116,7 @@ export function registerDialogFeature(app) {
       return;
     }
 
+    const shortcut = sanitizeShortcut(rawShortcut);
     app.store.state.app.globalShortcut = shortcut;
     app.runtime.shortcutEscapeArmed = false;
     if (app.refs.globalShortcutInput) app.refs.globalShortcutInput.value = shortcut;
@@ -1030,50 +1124,15 @@ export function registerDialogFeature(app) {
     void syncWindowBehavior();
   }
 
-  function shortcutFromKeyboardEvent(event) {
-    const mainKey = normalizeShortcutKey(event);
-    if (!mainKey) return "";
-
-    const parts = [];
-    if (event.ctrlKey || event.metaKey) parts.push("CommandOrControl");
-    if (event.altKey) parts.push("Alt");
-    if (event.shiftKey) parts.push("Shift");
-
-    const isFunctionKey = /^F([1-9]|1[0-9]|2[0-4])$/.test(mainKey);
-    if (!parts.length && !isFunctionKey) return "";
-    parts.push(mainKey);
-    return sanitizeShortcut(parts.join("+"));
-  }
-
-  function normalizeShortcutKey(event) {
-    const key = String(event.key || "");
-    if (["Control", "Meta", "Alt", "Shift"].includes(key)) return "";
-    if (key === " ") return "Space";
-
-    const namedKeys = {
-      "ArrowUp": "Up",
-      "ArrowDown": "Down",
-      "ArrowLeft": "Left",
-      "ArrowRight": "Right",
-      "Esc": "Escape",
-      "PageUp": "PageUp",
-      "PageDown": "PageDown"
-    };
-    if (namedKeys[key]) return namedKeys[key];
-    if (/^F([1-9]|1[0-9]|2[0-4])$/.test(key)) return key;
-    if (/^[a-z]$/i.test(key)) return key.toUpperCase();
-    if (/^[0-9]$/.test(key)) return key;
-    if (event.code?.startsWith("Key")) return event.code.slice(3).toUpperCase();
-    if (event.code?.startsWith("Digit")) return event.code.slice(5);
-    return key.length === 1 ? key.toUpperCase() : key;
-  }
-
   async function syncNativeWindowBehavior() {
     await app.desktopPanel?.configureWindowBehavior?.({
       autoHideEnabled: !!app.store.state.app.autoHideOnBlur,
       snapEdge: sanitizeSnapEdge(app.store.state.app.snapEdge),
       snapDistance: clampNumber(app.store.state.app.snapDistance, SNAP_DISTANCE_MIN, SNAP_DISTANCE_MAX, 14),
-      revealDelayMs: clampNumber(app.store.state.app.revealDelay, REVEAL_DELAY_MIN, REVEAL_DELAY_MAX, 250)
+      revealDelayMs: clampNumber(app.store.state.app.revealDelay, REVEAL_DELAY_MIN, REVEAL_DELAY_MAX, 250),
+      drawerEnabled: !!app.store.state.app.drawerModeEnabled,
+      drawerEdge: sanitizeSnapEdge(app.store.state.app.drawerEdge),
+      drawerDelayMs: clampNumber(app.store.state.app.drawerCollapseDelay, DRAWER_DELAY_MIN, DRAWER_DELAY_MAX, 450)
     });
   }
 
@@ -1114,6 +1173,23 @@ export function registerDialogFeature(app) {
     if (app.refs.revealDelayHint) {
       app.refs.revealDelayHint.textContent = `当前唤出延迟 ${app.store.state.app.revealDelay || 250} ms。`;
     }
+    if (app.refs.drawerModeHint) {
+      const edge = edgeLabel(sanitizeSnapEdge(app.store.state.app.drawerEdge));
+      const trigger = sanitizeDrawerTrigger(app.store.state.app.drawerTrigger) === "click" ? "点击" : "Hover 或点击";
+      app.refs.drawerModeHint.textContent = app.store.state.app.drawerModeEnabled
+        ? `收起位置：${edge}；唤出方式：${trigger}；失焦/离开后 ${app.store.state.app.drawerCollapseDelay || 450} ms 收起。`
+        : "边缘收起默认关闭。";
+    }
+  }
+
+  function edgeLabel(edge) {
+    return {
+      auto: "自动",
+      left: "左侧",
+      right: "右侧",
+      top: "顶部",
+      bottom: "底部"
+    }[edge] || "自动";
   }
 
   function scrollToSettingsSection(sectionName, activeButton = null) {
@@ -1160,6 +1236,63 @@ export function registerDialogFeature(app) {
     event.preventDefault();
     event.stopPropagation();
     closeDialog(activeDialog);
+  }
+
+  function updateItemActionMenu(item) {
+    const info = getItemActionInfo(item);
+    app.refs.itemContextMenu.querySelectorAll("[data-action-type]").forEach((node) => {
+      const type = node.dataset.actionType;
+      const visible = type === "all" || type === "quick" || type === info.type || (type === "admin" && info.canRunAsAdmin);
+      node.hidden = !visible;
+    });
+  }
+
+  function getItemActionInfo(item) {
+    const target = String(item?.url || "").trim();
+    const isWeb = /^https?:\/\//i.test(target);
+    const isLocal = !isWeb && (/^[a-z]:\\/i.test(target) || target.startsWith("\\\\"));
+    const canRunAsAdmin = isLocal && /\.(exe|bat|cmd|msi)(\s|$|")?/i.test(target);
+    return {
+      type: isWeb ? "web" : isLocal ? "local" : "all",
+      canRunAsAdmin
+    };
+  }
+
+  async function copyTextAction(text, successMessage, failureMessage) {
+    try {
+      await copyText(String(text || ""));
+      app.showDragToast(successMessage);
+    } catch (error) {
+      app.reportIssue(failureMessage, error?.message || String(error));
+    }
+  }
+
+  async function copyText(text) {
+    if (!text.trim()) throw new Error("copy text is empty");
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    if (!copied) throw new Error("clipboard API is unavailable");
+  }
+
+  async function runDesktopAction(action, successMessage, failureMessage) {
+    try {
+      await action?.();
+      app.showDragToast(successMessage);
+    } catch (error) {
+      app.reportIssue(failureMessage, error?.message || String(error));
+    }
   }
 
   function hideMenus() {

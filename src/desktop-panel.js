@@ -28,12 +28,15 @@ export async function ensureDesktopPanelBridge() {
     closeWindow: () => invoke("hide_main_window"),
     toggleWindow: () => invoke("toggle_main_window_command"),
     openUrl: (target) => invoke("open_target", { target }),
+    openContainingFolder: (target) => invoke("open_containing_folder", { target }),
+    openAsAdmin: (target) => invoke("open_as_admin", { target }),
     exportStateFile: (content) => invoke("export_state", { content }),
     importStateFile: () => invoke("import_state"),
     chooseBackupDirectory: () => invoke("choose_backup_directory"),
     writeBackupFile: (content, directory, retention) => invoke("write_backup_file", { content, directory, retention }),
     setSnapEnabled: (enabled) => invoke("set_snap_enabled", { enabled }),
     setWindowSize: (width, height) => invoke("set_window_size", { width, height }),
+    setDrawerCollapsed: (collapsed) => invoke("set_drawer_collapsed", { collapsed: Boolean(collapsed) }),
     setDropAccepting: async () => {},
     resolveDroppedPaths: (paths) => invoke("resolve_dropped_paths", { paths }),
     scanShortcutLocations: (sources) => invoke("scan_shortcut_locations", { sources }),
@@ -46,7 +49,10 @@ export async function ensureDesktopPanelBridge() {
       autoHideEnabled: Boolean(options?.autoHideEnabled),
       snapEdge: String(options?.snapEdge || "auto"),
       snapDistance: Number(options?.snapDistance || 14),
-      revealDelayMs: Number(options?.revealDelayMs || 250)
+      revealDelayMs: Number(options?.revealDelayMs || 250),
+      drawerEnabled: Boolean(options?.drawerEnabled),
+      drawerEdge: String(options?.drawerEdge || "auto"),
+      drawerDelayMs: Number(options?.drawerDelayMs || 450)
     }),
     configureGlobalShortcut: async (enabled, shortcut) => {
       const { register, unregister } = await import("@tauri-apps/plugin-global-shortcut");
@@ -94,12 +100,15 @@ function createBrowserFallbackBridge() {
         window.open(normalized, "_blank", "noopener,noreferrer");
       }
     },
+    openContainingFolder: async () => {},
+    openAsAdmin: async () => {},
     exportStateFile: async () => ({ canceled: true }),
     importStateFile: async () => ({ canceled: true }),
     chooseBackupDirectory: async () => ({ canceled: true }),
     writeBackupFile: async () => ({ filePath: "" }),
     setSnapEnabled: async () => {},
     setWindowSize: async () => {},
+    setDrawerCollapsed: async () => {},
     setDropAccepting: async () => {},
     resolveDroppedPaths: async () => [],
     scanShortcutLocations: async () => [],

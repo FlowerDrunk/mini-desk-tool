@@ -153,6 +153,78 @@ test("positions context menus close to the cursor", async ({ page }) => {
   expect(itemMenuBox.y).toBeLessThan(itemMenuPoint.y);
 });
 
+test("opens the app context menu from non-workspace chrome", async ({ page }) => {
+  await gotoApp(page);
+
+  await page.locator("#windowDragBand").dispatchEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+    clientX: 120,
+    clientY: 8
+  });
+
+  await expect(page.locator("#appContextMenu")).toBeVisible();
+  await expect(page.locator("#itemContextMenu")).toBeHidden();
+});
+
+test("shows contextual quick actions for web and local items", async ({ page }) => {
+  await gotoAppWithState(page, {
+    layout: { iconSize: 58, windowWidth: 360, showAddTile: false, showSearch: true, trackCount: 3 },
+    ui: { collapsedGroupIds: [], recentItemIds: [] },
+    app: {},
+    groups: [
+      {
+        id: "default-group",
+        name: "Default",
+        items: [
+          { id: "web-item", title: "Docs", description: "", url: "https://docs.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "local-item", title: "Tool", description: "", url: "C:\\\\Tools\\\\Tool.exe --safe", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+
+  await page.evaluate(() => {
+    window.__copiedText = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText(text) {
+          window.__copiedText = String(text || "");
+          return Promise.resolve();
+        }
+      }
+    });
+  });
+
+  await openItemContextMenu(page, 0);
+  await expect(page.locator('#itemContextMenu [data-action="copy-target"]')).toBeVisible();
+  await expect(page.locator('#itemContextMenu [data-action="open-browser"]')).toBeVisible();
+  await expect(page.locator('#itemContextMenu [data-action="open-folder"]')).toBeHidden();
+  await expect(page.locator('#itemContextMenu [data-action="open-admin"]')).toBeHidden();
+  await page.locator('#itemContextMenu [data-action="copy-target"]').click();
+  await expect.poll(() => page.evaluate(() => window.__copiedText)).toBe("https://docs.example.com");
+
+  await openItemContextMenu(page, 0);
+  await page.locator('#itemContextMenu [data-action="copy-keyword"]').click();
+  await expect.poll(() => page.evaluate(() => window.__copiedText)).toBe("Docs");
+
+  await openItemContextMenu(page, 0);
+  await page.locator('#itemContextMenu [data-action="open-browser"]').click();
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.openUrl.at(-1))).toBe("https://docs.example.com");
+
+  await openItemContextMenu(page, 1);
+  await expect(page.locator('#itemContextMenu [data-action="open-browser"]')).toBeHidden();
+  await expect(page.locator('#itemContextMenu [data-action="open-folder"]')).toBeVisible();
+  await expect(page.locator('#itemContextMenu [data-action="open-admin"]')).toBeVisible();
+  await page.locator('#itemContextMenu [data-action="open-folder"]').click();
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.openContainingFolder.at(-1))).toBe("C:\\\\Tools\\\\Tool.exe --safe");
+
+  await openItemContextMenu(page, 1);
+  await page.locator('#itemContextMenu [data-action="open-admin"]').click();
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.openAsAdmin.at(-1))).toBe("C:\\\\Tools\\\\Tool.exe --safe");
+});
+
 test("reorders items through drag and drop without opening them", async ({ page }) => {
   await gotoApp(page);
 
@@ -530,11 +602,18 @@ test("configures window behavior settings", async ({ page }) => {
   await page.selectOption("#snapEdgeSelect", "left");
   await setRangeValue(page, "#snapDistanceInput", 24);
   await setRangeValue(page, "#revealDelayInput", 400);
+  await page.check("#drawerModeEnabledInput");
+  await page.selectOption("#drawerEdgeSelect", "left");
+  await page.selectOption("#drawerTriggerSelect", "click");
+  await setRangeValue(page, "#drawerDelayInput", 800);
   await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.configureWindowBehavior.at(-1))).toEqual({
     autoHideEnabled: true,
     snapEdge: "left",
     snapDistance: 24,
-    revealDelayMs: 400
+    revealDelayMs: 400,
+    drawerEnabled: true,
+    drawerEdge: "left",
+    drawerDelayMs: 800
   });
   await expect(page.locator("#snapDistanceHint")).toHaveText("当前吸附距离 24 px。");
   await expect(page.locator("#revealDelayHint")).toHaveText("当前唤出延迟 400 ms。");
@@ -555,15 +634,62 @@ test("configures window behavior settings", async ({ page }) => {
 
   await page.click("#cancelSettingsDialog");
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
-  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.closeWindow.length)).toBe(1);
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.setDrawerCollapsed.at(-1))).toBe(true);
 
   const state = await getStoredState(page);
   expect(state.app.autoHideOnBlur).toBe(true);
   expect(state.app.snapEdge).toBe("left");
   expect(state.app.snapDistance).toBe(24);
   expect(state.app.revealDelay).toBe(400);
+  expect(state.app.drawerModeEnabled).toBe(true);
+  expect(state.app.drawerEdge).toBe("left");
+  expect(state.app.drawerCollapseDelay).toBe(800);
+  expect(state.app.drawerTrigger).toBe("click");
   expect(state.app.globalShortcutEnabled).toBe(true);
   expect(state.app.globalShortcut).toBe("CommandOrControl+Shift+M");
+});
+
+test("shows and expands the drawer handle when drawer mode is enabled", async ({ page }) => {
+  await gotoApp(page);
+  await openSettings(page);
+
+  await page.check("#drawerModeEnabledInput");
+  await page.selectOption("#drawerEdgeSelect", "right");
+  await page.selectOption("#drawerTriggerSelect", "click");
+  await setRangeValue(page, "#drawerDelayInput", 0);
+  await page.click("#cancelSettingsDialog");
+  await expect.poll(async () => page.locator("#settingsDialog").evaluate((node) => node.open)).toBe(false);
+
+  await expect(page.locator("#drawerHandle")).toHaveAttribute("aria-hidden", "false");
+  await expect.poll(() => page.locator("#appShell").evaluate((node) => node.dataset.drawerCollapsed)).toBe("false");
+  await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+  await expect.poll(() => page.locator("#appShell").evaluate((node) => node.dataset.drawerCollapsed)).toBe("true");
+  await expect(page.locator("#drawerHandle")).toBeVisible();
+
+  await page.locator("#drawerHandle").click();
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.setDrawerCollapsed.at(-1))).toBe(false);
+  await expect.poll(() => page.locator("#appShell").evaluate((node) => node.dataset.drawerCollapsed)).toBe("false");
+});
+
+test("uses hover intent before expanding the drawer handle", async ({ page }) => {
+  await gotoApp(page);
+  await openSettings(page);
+
+  await page.check("#drawerModeEnabledInput");
+  await page.selectOption("#drawerEdgeSelect", "right");
+  await setRangeValue(page, "#drawerDelayInput", 0);
+  await page.click("#cancelSettingsDialog");
+  await expect.poll(async () => page.locator("#settingsDialog").evaluate((node) => node.open)).toBe(false);
+  await page.evaluate(() => {
+    document.querySelector("#appShell").dataset.drawerCollapsed = "true";
+    return window.desktopPanel.setDrawerCollapsed(true);
+  });
+  await expect.poll(() => page.locator("#appShell").evaluate((node) => node.dataset.drawerCollapsed)).toBe("true");
+
+  await page.locator("#drawerHandle").hover();
+  await page.waitForTimeout(80);
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.setDrawerCollapsed.at(-1))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.setDrawerCollapsed.at(-1))).toBe(false);
 });
 
 test("records global shortcuts from keyboard input", async ({ page }) => {
