@@ -7,6 +7,8 @@ use std::{
     thread,
     time::Duration,
 };
+#[cfg(target_os = "windows")]
+use std::{iter, os::windows::ffi::OsStrExt};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use reqwest::header::USER_AGENT;
@@ -20,6 +22,18 @@ use tauri::{
 };
 #[cfg(desktop)]
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
+#[cfg(target_os = "windows")]
+use windows::{
+    core::{Interface, PCWSTR},
+    Win32::{
+        Foundation::RPC_E_CHANGED_MODE,
+        System::Com::{
+            CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
+            COINIT_APARTMENTTHREADED, STGM,
+        },
+        UI::Shell::{IShellLinkW, ShellLink},
+    },
+};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const MIN_WIDTH: f64 = 300.0;
@@ -157,8 +171,6 @@ struct IconfontIcon {
     show_svg: Option<String>,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct ShortcutQueryResult {
     target_path: String,
     arguments: String,
@@ -1529,47 +1541,95 @@ fn resolve_regular_entry(path: &Path) -> Result<Option<ResolvedShortcut>, String
     }))
 }
 
+#[cfg(target_os = "windows")]
+struct ComApartment {
+    should_uninitialize: bool,
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for ComApartment {
+    fn drop(&mut self) {
+        if self.should_uninitialize {
+            unsafe {
+                CoUninitialize();
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn initialize_com_apartment() -> Result<ComApartment, String> {
+    let initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    if initialized.is_ok() {
+        Ok(ComApartment {
+            should_uninitialize: true,
+        })
+    } else if initialized == RPC_E_CHANGED_MODE {
+        Ok(ComApartment {
+            should_uninitialize: false,
+        })
+    } else {
+        Err(initialized.message())
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn query_windows_shortcut(path: &Path) -> Result<Option<ShortcutQueryResult>, String> {
-    let script = [
-        "$ErrorActionPreference = 'Stop'",
-        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
-        "$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($args[0])",
-        "$result = [pscustomobject]@{",
-        "  targetPath = [string]$shortcut.TargetPath",
-        "  arguments = [string]$shortcut.Arguments",
-        "}",
-        "$result | ConvertTo-Json -Compress",
-    ]
-    .join("; ");
+    let _apartment = initialize_com_apartment()?;
 
-    let output = Command::new(power_shell_path())
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            &script,
-            &path.display().to_string(),
-        ])
-        .output()
-        .map_err(|error| error.to_string())?;
+    let shell_link: IShellLinkW =
+        unsafe { CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER) }
+            .map_err(|error| error.to_string())?;
+    let persist_file: IPersistFile = shell_link.cast().map_err(|error| error.to_string())?;
+    let shortcut_path = path
+        .as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect::<Vec<_>>();
 
-    if !output.status.success() {
+    unsafe {
+        persist_file
+            .Load(PCWSTR(shortcut_path.as_ptr()), STGM(0))
+            .map_err(|error| error.to_string())?;
+    }
+
+    let mut target_buffer = vec![0u16; 32768];
+    let mut arguments_buffer = vec![0u16; 4096];
+
+    unsafe {
+        shell_link
+            .GetPath(&mut target_buffer, std::ptr::null_mut(), 0)
+            .map_err(|error| error.to_string())?;
+        shell_link
+            .GetArguments(&mut arguments_buffer)
+            .map_err(|error| error.to_string())?;
+    }
+
+    let target_path = wide_buffer_to_string(&target_buffer);
+    let arguments = wide_buffer_to_string(&arguments_buffer);
+
+    if target_path.trim().is_empty() && arguments.trim().is_empty() {
         return Ok(None);
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if stdout.is_empty() {
-        return Ok(None);
-    }
+    Ok(Some(ShortcutQueryResult {
+        target_path,
+        arguments,
+    }))
+}
 
-    let parsed: ShortcutQueryResult =
-        serde_json::from_str(&stdout).map_err(|error| error.to_string())?;
+#[cfg(not(target_os = "windows"))]
+fn query_windows_shortcut(_path: &Path) -> Result<Option<ShortcutQueryResult>, String> {
+    Ok(None)
+}
 
-    if parsed.target_path.trim().is_empty() && parsed.arguments.trim().is_empty() {
-        return Ok(None);
-    }
-
-    Ok(Some(parsed))
+#[cfg(target_os = "windows")]
+fn wide_buffer_to_string(buffer: &[u16]) -> String {
+    let len = buffer
+        .iter()
+        .position(|value| *value == 0)
+        .unwrap_or(buffer.len());
+    String::from_utf16_lossy(&buffer[..len]).trim().to_string()
 }
 
 fn shortcut_icon_for_target(target: &str) -> String {
@@ -2056,6 +2116,63 @@ mod tests {
         assert_eq!(resolved.url, path.display().to_string());
 
         let _ = fs::remove_file(path);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn resolves_windows_shortcut_with_native_com() {
+        let id = format!("{}-{}", current_unix_millis(), std::process::id());
+        let target = std::env::temp_dir().join(format!("mini-desk-tool-target-{id}.txt"));
+        let shortcut = std::env::temp_dir().join(format!("mini-desk-tool-target-{id}.lnk"));
+        fs::write(&target, "shortcut target").expect("write target file");
+        create_test_shortcut(&shortcut, &target, "--from-test").expect("create shortcut");
+
+        let parsed = query_windows_shortcut(&shortcut)
+            .expect("query shortcut")
+            .expect("shortcut details");
+
+        assert_eq!(PathBuf::from(parsed.target_path), target);
+        assert_eq!(parsed.arguments, "--from-test");
+
+        let _ = fs::remove_file(shortcut);
+        let _ = fs::remove_file(target);
+    }
+
+    #[cfg(target_os = "windows")]
+    fn create_test_shortcut(path: &Path, target: &Path, arguments: &str) -> Result<(), String> {
+        let _apartment = initialize_com_apartment()?;
+        let shell_link: IShellLinkW =
+            unsafe { CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER) }
+                .map_err(|error| error.to_string())?;
+        let persist_file: IPersistFile = shell_link.cast().map_err(|error| error.to_string())?;
+        let target_path = target
+            .as_os_str()
+            .encode_wide()
+            .chain(iter::once(0))
+            .collect::<Vec<_>>();
+        let shortcut_path = path
+            .as_os_str()
+            .encode_wide()
+            .chain(iter::once(0))
+            .collect::<Vec<_>>();
+        let shortcut_arguments = arguments
+            .encode_utf16()
+            .chain(iter::once(0))
+            .collect::<Vec<_>>();
+
+        unsafe {
+            shell_link
+                .SetPath(PCWSTR(target_path.as_ptr()))
+                .map_err(|error| error.to_string())?;
+            shell_link
+                .SetArguments(PCWSTR(shortcut_arguments.as_ptr()))
+                .map_err(|error| error.to_string())?;
+            persist_file
+                .Save(PCWSTR(shortcut_path.as_ptr()), true)
+                .map_err(|error| error.to_string())?;
+        }
+
+        Ok(())
     }
 
     #[test]
