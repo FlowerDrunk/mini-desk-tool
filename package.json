@@ -1,6 +1,6 @@
 {
   "name": "desktop-panel",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Desktop floating panel built with Tauri",
   "scripts": {
     "start": "npm run dev",
@@ -8,6 +8,8 @@
     "dev:web": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "build:renderer": "vite build",
     "build": "node scripts/run-tauri.js build",
+    "check:release": "node scripts/check-release.js",
+    "generate:update-manifest": "node scripts/generate-update-manifest.js",
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed"
@@ -19,6 +21,8 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
-    "@tauri-apps/plugin-global-shortcut": "^2.3.1"
+    "@tauri-apps/plugin-global-shortcut": "^2.3.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1"
   }
 }

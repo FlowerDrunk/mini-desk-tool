@@ -13,6 +13,7 @@ export async function ensureDesktopPanelBridge() {
 
   const appWindow = windowApi.getCurrentWindow();
   let registeredGlobalShortcut = "";
+  let pendingUpdate = null;
   let nativeDragScaleFactor = Number(window.devicePixelRatio) || 1;
   const refreshNativeDragScaleFactor = async () => {
     try {
@@ -45,6 +46,32 @@ export async function ensureDesktopPanelBridge() {
     snapAfterDrag: () => invoke("snap_window_after_drag"),
     getLaunchAtLogin: () => invoke("get_launch_at_login"),
     setLaunchAtLogin: (enabled) => invoke("set_launch_at_login", { enabled }),
+    checkForUpdate: async () => {
+      const { check } = await import("@tauri-apps/plugin-updater");
+      pendingUpdate = await check();
+      if (!pendingUpdate) return { available: false };
+      return {
+        available: true,
+        version: pendingUpdate.version || "",
+        currentVersion: pendingUpdate.currentVersion || "",
+        date: pendingUpdate.date || "",
+        notes: pendingUpdate.body || ""
+      };
+    },
+    installUpdate: async (onProgress) => {
+      if (!pendingUpdate) {
+        const { check } = await import("@tauri-apps/plugin-updater");
+        pendingUpdate = await check();
+      }
+      if (!pendingUpdate) throw new Error("no update available");
+
+      await pendingUpdate.downloadAndInstall((event) => {
+        onProgress?.(event);
+      });
+
+      const { relaunch } = await import("@tauri-apps/plugin-process");
+      await relaunch();
+    },
     configureWindowBehavior: (options) => invoke("configure_window_behavior", {
       autoHideEnabled: Boolean(options?.autoHideEnabled),
       snapEdge: String(options?.snapEdge || "auto"),
@@ -52,7 +79,8 @@ export async function ensureDesktopPanelBridge() {
       revealDelayMs: Number(options?.revealDelayMs || 250),
       drawerEnabled: Boolean(options?.drawerEnabled),
       drawerEdge: String(options?.drawerEdge || "auto"),
-      drawerDelayMs: Number(options?.drawerDelayMs || 450)
+      drawerDelayMs: Number(options?.drawerDelayMs || 450),
+      reduceMotion: Boolean(options?.reduceMotion)
     }),
     configureGlobalShortcut: async (enabled, shortcut) => {
       const { register, unregister } = await import("@tauri-apps/plugin-global-shortcut");
@@ -117,6 +145,10 @@ function createBrowserFallbackBridge() {
     snapAfterDrag: async () => {},
     getLaunchAtLogin: async () => false,
     setLaunchAtLogin: async (enabled) => Boolean(enabled),
+    checkForUpdate: async () => ({ available: false }),
+    installUpdate: async () => {
+      throw new Error("no update available");
+    },
     configureWindowBehavior: async () => {},
     configureGlobalShortcut: async (enabled, shortcut) => ({
       enabled: Boolean(enabled && shortcut),

@@ -225,6 +225,71 @@ test("shows contextual quick actions for web and local items", async ({ page }) 
   await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.openAsAdmin.at(-1))).toBe("C:\\\\Tools\\\\Tool.exe --safe");
 });
 
+test("refreshes a single icon from the item context menu without overwriting custom icons", async ({ page }) => {
+  const refreshedIcon = svgIconDataUrl("RF", "#0f766e");
+  await gotoAppWithState(page, {
+    layout: { iconSize: 58, windowWidth: 360, showAddTile: false, showSearch: true, trackCount: 3 },
+    ui: { collapsedGroupIds: [], recentItemIds: [] },
+    groups: [
+      {
+        id: "default-group",
+        name: "Default",
+        items: [
+          { id: "web-item", title: "Docs", description: "reference", url: "https://docs.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "custom-item", title: "Custom", description: "", url: "https://custom.example.com", size: "1x1", iconMode: "custom", customIcon: svgIconDataUrl("CU", "#7c3aed"), shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+  await page.evaluate(({ icon }) => {
+    window.__desktopPanelMock.setIconSuggestions("Docs reference docs.example.com", [
+      { id: "docs-refreshed", name: "Docs Refreshed", url: icon }
+    ]);
+  }, { icon: refreshedIcon });
+
+  await openItemContextMenu(page, 0);
+  await page.locator('#itemContextMenu [data-action="refresh-icon"]').click();
+  await expect.poll(async () => {
+    const state = await getStoredState(page);
+    const item = state.groups[0].items.find((entry) => entry.id === "web-item");
+    return {
+      customIcon: item.customIcon,
+      iconSource: item.iconSource,
+      iconFailureReason: item.iconFailureReason,
+      hasUpdatedAt: Boolean(item.iconUpdatedAt)
+    };
+  }).toEqual({
+    customIcon: refreshedIcon,
+    iconSource: "Docs Refreshed",
+    iconFailureReason: "",
+    hasUpdatedAt: true
+  });
+
+  await openItemContextMenu(page, 1);
+  await page.locator('#itemContextMenu [data-action="refresh-icon"]').click();
+  await expect(page.locator("#issueCenter")).toContainText("当前使用自定义图标");
+  await expect.poll(async () => {
+    const state = await getStoredState(page);
+    const item = state.groups[0].items.find((entry) => entry.id === "custom-item");
+    return {
+      customIcon: item.customIcon,
+      iconFailureReason: item.iconFailureReason
+    };
+  }).toMatchObject({
+    customIcon: expect.stringContaining("CU"),
+    iconFailureReason: expect.stringContaining("自定义图标")
+  });
+
+  await openSettings(page);
+  await expect(page.locator("#iconResourceSummary")).toContainText("1 条失败记录");
+  await page.click("#clearIconFailuresButton");
+  await expect(page.locator("#iconResourceStatus")).toContainText("已清理 1 条图标失败记录");
+  await expect.poll(async () => {
+    const state = await getStoredState(page);
+    return state.groups[0].items.map((item) => item.iconFailureReason || "");
+  }).toEqual(["", ""]);
+});
+
 test("reorders items through drag and drop without opening them", async ({ page }) => {
   await gotoApp(page);
 
@@ -301,6 +366,70 @@ test("filters items, searches with the selected engine, and records clicked rece
   await expect(page.locator('.group[data-group-id="dev-group"] .tile[data-item-id="github-item"]')).toHaveAttribute("data-size", "2x2");
 });
 
+test("supports keyboard navigation, opening, and confirmed delete for focused icons", async ({ page }) => {
+  await gotoAppWithState(page, {
+    layout: {
+      iconSize: 58,
+      windowWidth: 360,
+      showGroupTitle: true,
+      showAddTile: false,
+      showSearch: true,
+      flowDirection: "ltr",
+      trackCount: 3
+    },
+    ui: {
+      collapsedGroupIds: [],
+      recentItemIds: []
+    },
+    app: { snapToEdge: true },
+    groups: [
+      {
+        id: "default-group",
+        name: "Default",
+        items: [
+          { id: "alpha-item", title: "Alpha", description: "", url: "https://alpha.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "beta-item", title: "Beta", description: "", url: "https://beta.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "gamma-item", title: "Gamma", description: "", url: "https://gamma.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+
+  await page.locator('.tile[data-item-id="alpha-item"]').focus();
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => page.evaluate(() => document.activeElement?.dataset?.itemId)).toBe("beta-item");
+
+  await page.keyboard.press("Enter");
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.openUrl.at(-1))).toBe(
+    "https://beta.example.com"
+  );
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator('.tile[data-item-id="alpha-item"]').focus();
+  await page.keyboard.press("Delete");
+  await expect(page.locator('.tile[data-item-id="alpha-item"]')).toHaveCount(0);
+  await expect.poll(async () => {
+    const state = await getStoredState(page);
+    return state.groups[0].items.map((item) => item.id);
+  }).toEqual(["beta-item", "gamma-item"]);
+});
+
+test("applies reduced motion and high contrast focus settings", async ({ page }) => {
+  await gotoApp(page);
+  await openSettings(page);
+
+  await page.check("#reduceMotionInput");
+  await page.check("#highContrastFocusInput");
+
+  await expect(page.locator("#appShell")).toHaveAttribute("data-reduce-motion", "true");
+  await expect(page.locator("#appShell")).toHaveAttribute("data-high-contrast-focus", "true");
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.windowBehavior.reduceMotion)).toBe(true);
+
+  const state = await getStoredState(page);
+  expect(state.layout.reduceMotion).toBe(true);
+  expect(state.layout.highContrastFocus).toBe(true);
+});
+
 test("can hide the search box from settings", async ({ page }) => {
   await gotoApp(page);
   await expect(page.locator(".quick-panel")).toBeVisible();
@@ -351,6 +480,74 @@ test("persists collapsed groups and expands them on search", async ({ page }) =>
   await expect(page.locator(".tile .label")).toHaveText(["GitHub"]);
 });
 
+test("reorders groups by dragging group titles", async ({ page }) => {
+  await gotoAppWithState(page, {
+    layout: {
+      iconSize: 58,
+      windowWidth: 360,
+      showGroupTitle: true,
+      showAddTile: false,
+      showSearch: true,
+      flowDirection: "ltr",
+      trackCount: 3
+    },
+    ui: { collapsedGroupIds: [], recentItemIds: [] },
+    groups: [
+      {
+        id: "alpha-group",
+        name: "Alpha",
+        items: [
+          { id: "alpha-item", title: "Alpha Item", description: "", url: "https://alpha.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      },
+      {
+        id: "beta-group",
+        name: "Beta",
+        items: [
+          { id: "beta-item", title: "Beta Item", description: "", url: "https://beta.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      },
+      {
+        id: "gamma-group",
+        name: "Gamma",
+        items: [
+          { id: "gamma-item", title: "Gamma Item", description: "", url: "https://gamma.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+
+  await page.evaluate(() => {
+    const source = document.querySelector('.group[data-group-id="gamma-group"] .group-title');
+    const target = document.querySelector('.group[data-group-id="alpha-group"]');
+    const sourceRect = source.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const pointer = { pointerId: 71, pointerType: "mouse", button: 0, buttons: 1, bubbles: true };
+    source.dispatchEvent(new PointerEvent("pointerdown", {
+      ...pointer,
+      clientX: sourceRect.left + 20,
+      clientY: sourceRect.top + sourceRect.height / 2
+    }));
+    window.dispatchEvent(new PointerEvent("pointermove", {
+      ...pointer,
+      clientX: sourceRect.left + 20,
+      clientY: targetRect.top - 20
+    }));
+    window.dispatchEvent(new PointerEvent("pointerup", {
+      ...pointer,
+      buttons: 0,
+      clientX: sourceRect.left + 20,
+      clientY: targetRect.top - 20
+    }));
+  });
+
+  await expect.poll(async () => {
+    const state = await getStoredState(page);
+    return state.groups.map((group) => group.id);
+  }).toEqual(["gamma-group", "alpha-group", "beta-group"]);
+  await expect(page.locator(".group-title-name")).toHaveText(["Gamma", "Alpha", "Beta"]);
+});
+
 test("imports shortcuts from desktop through settings", async ({ page }) => {
   await gotoApp(page);
   await page.evaluate(() => {
@@ -361,6 +558,10 @@ test("imports shortcuts from desktop through settings", async ({ page }) => {
   });
 
   await openSettings(page);
+  await page.click("#importDesktopButton");
+  await expect(page.locator("#importDesktopButton")).toHaveAttribute("data-confirming", "true");
+  await expect(page.locator("#dataActionStatus")).toContainText("再次点击");
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.scanShortcutLocations.length)).toBe(0);
   await page.click("#importDesktopButton");
 
   await expect(page.locator(".tile .label")).toContainText(["Desktop App", "Desktop Site"]);
@@ -430,6 +631,191 @@ test("batch moves, resizes, and deletes selected items", async ({ page }) => {
     const state = await getStoredState(page);
     return state.groups.flatMap((group) => group.items).map((item) => item.id);
   }).toEqual(["gamma-item", "beta-item"]);
+});
+
+test("batch refreshes selected icons and skips custom icons", async ({ page }) => {
+  const alphaIcon = svgIconDataUrl("AR", "#0369a1");
+  const betaIcon = svgIconDataUrl("BR", "#16a34a");
+  await gotoAppWithState(page, {
+    layout: {
+      iconSize: 58,
+      windowWidth: 360,
+      showGroupTitle: true,
+      showAddTile: false,
+      showSearch: true,
+      flowDirection: "ltr",
+      trackCount: 3
+    },
+    ui: { collapsedGroupIds: [], recentItemIds: [] },
+    groups: [
+      {
+        id: "default-group",
+        name: "Default",
+        items: [
+          { id: "alpha-item", title: "Alpha", description: "docs", url: "https://alpha.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "beta-item", title: "Beta", description: "docs", url: "https://beta.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "custom-item", title: "Custom", description: "", url: "https://custom.example.com", size: "1x1", iconMode: "custom", customIcon: svgIconDataUrl("CU", "#7c3aed"), shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+  await page.evaluate(({ alpha, beta }) => {
+    window.__desktopPanelMock.setIconSuggestions("Alpha docs alpha.example.com", [
+      { id: "alpha-refreshed", name: "Alpha Refreshed", url: alpha }
+    ]);
+    window.__desktopPanelMock.setIconSuggestions("Beta docs beta.example.com", [
+      { id: "beta-refreshed", name: "Beta Refreshed", url: beta }
+    ]);
+  }, { alpha: alphaIcon, beta: betaIcon });
+
+  await longPressTile(page, '.tile[data-item-id="alpha-item"]');
+  await page.locator('.tile[data-item-id="beta-item"]').click();
+  await page.locator('.tile[data-item-id="custom-item"]').click();
+  await page.click("#batchRefreshIconsButton");
+
+  await expect.poll(async () => {
+    const state = await getStoredState(page);
+    return Object.fromEntries(state.groups[0].items.map((item) => [item.id, item.customIcon]));
+  }).toMatchObject({
+    "alpha-item": alphaIcon,
+    "beta-item": betaIcon
+  });
+  await expect(page.locator("#issueCenter")).toContainText("成功 2，跳过 1，失败 0");
+});
+
+test("sorts groups by name and reports possible duplicates without deleting items", async ({ page }) => {
+  await gotoAppWithState(page, {
+    layout: {
+      iconSize: 58,
+      windowWidth: 360,
+      showGroupTitle: true,
+      showAddTile: false,
+      showSearch: true,
+      flowDirection: "ltr",
+      trackCount: 3
+    },
+    ui: { collapsedGroupIds: [], recentItemIds: [] },
+    groups: [
+      {
+        id: "dev-group",
+        name: "开发",
+        items: [
+          { id: "beta-item", title: "Beta", description: "", url: "https://beta.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "alpha-item", title: "Alpha", description: "", url: "https://alpha.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      },
+      {
+        id: "docs-group",
+        name: "文档",
+        items: [
+          { id: "docs-a", title: "Docs", description: "", url: "https://docs.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "docs-b", title: "Docs Copy", description: "", url: "https://docs.example.com/", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+
+  await openSettings(page);
+  await page.selectOption("#organizeGroupSelect", "dev-group");
+  await page.click("#sortGroupByNameButton");
+  await expect(page.locator("#sortGroupByNameButton")).toHaveAttribute("data-confirming", "true");
+  await expect(page.locator("#organizeStatus")).toContainText("再次点击");
+  await page.click("#sortGroupByNameButton");
+
+  await expect.poll(async () => {
+    const state = await getStoredState(page);
+    return state.groups.find((group) => group.id === "dev-group").items.map((item) => item.title);
+  }).toEqual(["Alpha", "Beta"]);
+  await expect(page.locator("#organizeStatus")).toContainText("已按名称整理");
+
+  await page.click("#findDuplicateItemsButton");
+  await expect(page.locator("#organizeStatus")).toContainText("发现 1 组可能重复项");
+  await expect.poll(async () => {
+    const state = await getStoredState(page);
+    return state.groups.flatMap((group) => group.items).map((item) => item.id).sort();
+  }).toEqual(["alpha-item", "beta-item", "docs-a", "docs-b"]);
+});
+
+test("applies grouped suggestions only after inline confirmation", async ({ page }) => {
+  await gotoAppWithState(page, {
+    layout: {
+      iconSize: 58,
+      windowWidth: 360,
+      showGroupTitle: true,
+      showAddTile: false,
+      showSearch: true,
+      flowDirection: "ltr",
+      trackCount: 3
+    },
+    ui: { collapsedGroupIds: [], recentItemIds: [] },
+    groups: [
+      {
+        id: "default-group",
+        name: "常用",
+        items: [
+          { id: "github-item", title: "GitHub", description: "code hosting", url: "https://github.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "gitee-item", title: "Gitee", description: "code hosting", url: "https://gitee.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "bilibili-item", title: "Bilibili", description: "视频", url: "https://bilibili.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "tencent-video-item", title: "腾讯视频", description: "", url: "https://v.qq.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+
+  await openSettings(page);
+  await page.click("#suggestGroupsButton");
+  await expect(page.locator("#suggestGroupsButton")).toHaveAttribute("data-confirming", "true");
+  await expect(page.locator("#organizeStatus")).toContainText("建议新建 2 个分组");
+  await expect.poll(async () => (await getStoredState(page)).groups).toHaveLength(1);
+
+  await page.click("#suggestGroupsButton");
+  await expect.poll(async () => {
+    const state = await getStoredState(page);
+    return state.groups.map((group) => ({ name: group.name, items: group.items.map((item) => item.id) }));
+  }).toEqual([
+    { name: "常用", items: [] },
+    { name: "开发", items: ["github-item", "gitee-item"] },
+    { name: "影音", items: ["bilibili-item", "tencent-video-item"] }
+  ]);
+  await expect(page.locator("#organizeStatus")).toContainText("已应用 2 个分组建议");
+});
+
+test("compacts a group by placing larger icons first after confirmation", async ({ page }) => {
+  await gotoAppWithState(page, {
+    layout: {
+      iconSize: 58,
+      windowWidth: 420,
+      showGroupTitle: true,
+      showAddTile: false,
+      showSearch: true,
+      flowDirection: "ltr",
+      trackCount: 3
+    },
+    ui: { collapsedGroupIds: [], recentItemIds: [] },
+    groups: [
+      {
+        id: "default-group",
+        name: "常用",
+        items: [
+          { id: "small-b", title: "Beta", description: "", url: "https://beta.example.com", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "large-a", title: "Alpha Large", description: "", url: "https://alpha.example.com", size: "2x2", iconMode: "default", customIcon: "", shortcutIcon: "" },
+          { id: "wide-c", title: "Charlie Wide", description: "", url: "https://charlie.example.com", size: "1x2", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+
+  await openSettings(page);
+  await page.click("#compactGroupButton");
+  await expect(page.locator("#compactGroupButton")).toHaveAttribute("data-confirming", "true");
+  await expect(page.locator("#organizeStatus")).toContainText("再次点击");
+  await page.click("#compactGroupButton");
+
+  await expect.poll(async () => {
+    const state = await getStoredState(page);
+    return state.groups[0].items.map((item) => item.id);
+  }).toEqual(["large-a", "wide-c", "small-b"]);
+  await expect(page.locator("#organizeStatus")).toContainText("已紧凑排列");
 });
 
 test("snaps the window only after the drag interaction finishes", async ({ page }) => {
@@ -522,11 +908,10 @@ test("updates settings and calls desktop integration hooks", async ({ page }) =>
   await page.check("#showAddTileInput");
   await page.uncheck("#showGroupTitleInput");
   await page.selectOption("#layoutDirectionInput", "rtl");
-  await setRangeValue(page, "#trackCountInput", 4);
+  await setRangeValue(page, "#trackCountInput", 9);
   await commitRangeValue(page, "#windowWidthInput", 420);
   await page.uncheck("#snapEdgeInput");
   await page.check("#launchAtLoginInput");
-  await page.click("#closeWindow");
 
   await expect(page.locator(".add-tile")).toHaveCount(1);
   await expect(page.locator(".group-title")).toHaveCount(0);
@@ -536,15 +921,114 @@ test("updates settings and calls desktop integration hooks", async ({ page }) =>
     lastWindowSize: window.__desktopPanelMock.state.calls.setWindowSize.at(-1),
     lastSnapEnabled: window.__desktopPanelMock.state.calls.setSnapEnabled.at(-1),
     setLaunchAtLogin: window.__desktopPanelMock.state.calls.setLaunchAtLogin,
-    closeWindow: window.__desktopPanelMock.state.calls.closeWindow.length,
     trackCount: getComputedStyle(document.documentElement).getPropertyValue("--track-count").trim()
   }))).toEqual({
     lastWindowSize: [420, undefined],
     lastSnapEnabled: false,
     setLaunchAtLogin: [true],
-    closeWindow: 1,
-    trackCount: "4"
+    trackCount: "9"
   });
+});
+
+test("shows release info, checks updates, installs updates, and copies a privacy-safe feedback summary", async ({ page }) => {
+  await gotoAppWithState(page, {
+    layout: {
+      iconSize: 58,
+      windowWidth: 360,
+      showGroupTitle: true,
+      showAddTile: false,
+      showSearch: true,
+      showRecent: true,
+      flowDirection: "ltr",
+      trackCount: 3,
+      layoutPreset: "standard",
+      theme: "aurora"
+    },
+    ui: {
+      collapsedGroupIds: [],
+      recentItemIds: []
+    },
+    app: {
+      snapToEdge: true,
+      drawerModeEnabled: true,
+      drawerEdge: "right",
+      drawerTrigger: "click",
+      autoBackupEnabled: true,
+      backupDirectory: "C:\\\\Private\\\\Backups"
+    },
+    groups: [
+      {
+        id: "default-group",
+        name: "Private Group",
+        items: [
+          { id: "secret-item", title: "Secret", description: "", url: "C:\\\\Private\\\\Secret.exe", size: "1x1", iconMode: "default", customIcon: "", shortcutIcon: "" }
+        ]
+      }
+    ]
+  });
+
+  await page.evaluate(() => {
+    window.__copiedText = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText(text) {
+          window.__copiedText = String(text || "");
+          return Promise.resolve();
+        }
+      }
+    });
+  });
+
+  await openSettings(page);
+  await expect(page.locator("#appVersionLabel")).toHaveText("当前版本 v1.2.2");
+
+  await page.evaluate(() => {
+    window.__desktopPanelMock.setUpdateResult({ available: false, checked: true });
+  });
+  await page.click("#checkUpdatesButton");
+  await expect(page.locator("#feedbackSummaryStatus")).toContainText("当前已是最新版本");
+
+  await page.evaluate(() => {
+    window.__desktopPanelMock.setUpdateResult({
+      available: true,
+      version: "1.2.3",
+      notes: "自动更新测试版本"
+    });
+  });
+  await page.click("#checkUpdatesButton");
+  await expect(page.locator("#feedbackSummaryStatus")).toContainText("发现新版本 v1.2.3");
+  await expect(page.locator("#installUpdateButton")).toBeVisible();
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.click("#installUpdateButton");
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.installUpdate.length)).toBe(1);
+  await expect(page.locator("#feedbackSummaryStatus")).toContainText("下载完成");
+
+  await page.click("#copyFeedbackSummaryButton");
+  const summary = await page.evaluate(() => window.__copiedText);
+  expect(summary).toContain("Mini Desk Tool 反馈摘要");
+  expect(summary).toContain("版本：v1.2.2");
+  expect(summary).toContain('"drawerModeEnabled": true');
+  expect(summary).not.toContain("Secret.exe");
+  expect(summary).not.toContain("Private Group");
+  expect(summary).not.toContain("Private\\\\Backups");
+  await expect(page.locator("#feedbackSummaryStatus")).toContainText("反馈摘要已复制");
+});
+
+test("shows an update check failure without closing settings", async ({ page }) => {
+  await gotoApp(page);
+  await openSettings(page);
+
+  await page.evaluate(() => {
+    window.__desktopPanelMock.setUpdateResult(new Error("Could not fetch a valid release JSON from the remote"));
+  });
+  await page.click("#checkUpdatesButton");
+
+  await expect(page.locator("#settingsDialog")).toHaveJSProperty("open", true);
+  await expect(page.locator("#feedbackSummaryStatus")).toContainText("检查更新失败");
+  await expect(page.locator("#feedbackSummaryStatus")).toContainText("latest.json");
+  await expect(page.locator("#feedbackSummaryStatus")).toContainText(".sig 签名文件");
 });
 
 test("navigates settings sections with the floating icon rail", async ({ page }) => {
@@ -613,7 +1097,8 @@ test("configures window behavior settings", async ({ page }) => {
     revealDelayMs: 400,
     drawerEnabled: true,
     drawerEdge: "left",
-    drawerDelayMs: 800
+    drawerDelayMs: 800,
+    reduceMotion: false
   });
   await expect(page.locator("#snapDistanceHint")).toHaveText("当前吸附距离 24 px。");
   await expect(page.locator("#revealDelayHint")).toHaveText("当前唤出延迟 400 ms。");
@@ -917,7 +1402,7 @@ test("keeps the settings dialog open while applying settings", async ({ page }) 
   await page.selectOption("#layoutDirectionInput", "rtl");
   await expect.poll(async () => page.locator("#settingsDialog").evaluate((node) => node.open)).toBe(true);
 
-  await setRangeValue(page, "#trackCountInput", 4);
+  await setRangeValue(page, "#trackCountInput", 9);
   await expect.poll(async () => page.locator("#settingsDialog").evaluate((node) => node.open)).toBe(true);
 });
 
@@ -1127,6 +1612,7 @@ test("keeps current data when import fails and shows the issue center", async ({
   await expect(page.locator(".tile .label")).toHaveText(["知乎", "腾讯视频"]);
   await expect(page.locator("#issueCenter")).toBeVisible();
   await expect(page.locator("#issueList")).toContainText("导入失败");
+  await expect(page.locator("#issueCenter")).toBeHidden({ timeout: 7000 });
 });
 
 test("imports dropped shortcuts and enriches their icons in the background", async ({ page }) => {

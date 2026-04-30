@@ -81,6 +81,7 @@ struct WindowRuntimeState {
     drawer_edge: SnapEdge,
     drawer_resolved_edge: SnapEdge,
     drawer_collapse_delay_ms: u64,
+    reduce_motion: bool,
     edge_watcher_revision: u64,
     move_revision: u64,
     is_quitting: bool,
@@ -233,6 +234,7 @@ fn configure_window_behavior(
     drawer_enabled: bool,
     drawer_edge: String,
     drawer_delay_ms: u64,
+    reduce_motion: bool,
 ) -> Result<(), String> {
     let edge = parse_snap_edge(&snap_edge);
     let drawer_edge = parse_snap_edge(&drawer_edge);
@@ -252,6 +254,7 @@ fn configure_window_behavior(
         runtime.drawer_enabled = drawer_enabled;
         runtime.drawer_edge = drawer_edge;
         runtime.drawer_collapse_delay_ms = drawer_delay;
+        runtime.reduce_motion = reduce_motion;
         if !drawer_enabled {
             runtime.drawer_collapsed = false;
         }
@@ -657,6 +660,8 @@ pub fn run() {
             None::<Vec<&str>>,
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -1013,7 +1018,7 @@ fn animate_bounds(
     from: WindowBounds,
     to: WindowBounds,
 ) -> Result<(), String> {
-    if !should_animate_bounds(from, to) {
+    if should_reduce_motion(state) || !should_animate_bounds(from, to) {
         return apply_bounds(window, state, to);
     }
 
@@ -1056,7 +1061,7 @@ fn animate_webview_bounds(
     from: WindowBounds,
     to: WindowBounds,
 ) -> Result<(), String> {
-    if !should_animate_bounds(from, to) {
+    if should_reduce_motion(state) || !should_animate_bounds(from, to) {
         return apply_webview_bounds(window, state, to);
     }
 
@@ -1122,6 +1127,14 @@ where
 
 fn should_animate_bounds(from: WindowBounds, to: WindowBounds) -> bool {
     (from.x - to.x).abs() > 1.0 || (from.y - to.y).abs() > 1.0 || should_animate_size(from, to)
+}
+
+fn should_reduce_motion(state: &State<RuntimeState>) -> bool {
+    state
+        .inner
+        .lock()
+        .map(|runtime| runtime.reduce_motion)
+        .unwrap_or(false)
 }
 
 fn should_animate_size(from: WindowBounds, to: WindowBounds) -> bool {

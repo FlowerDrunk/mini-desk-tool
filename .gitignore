@@ -2,7 +2,9 @@
 .DS_Store
 Thumbs.db
 .codex/
+.tauri/
 dist/
 renderer-dist/
 playwright-report/
 test-results/
+target/

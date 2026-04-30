@@ -560,6 +560,36 @@ dialog {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
 
+.group.group-reorder-source {
+  opacity: 0.58;
+  transform: scale(0.985);
+}
+
+.group.group-reorder-before,
+.group.group-reorder-after {
+  position: relative;
+}
+
+.group.group-reorder-before::before,
+.group.group-reorder-after::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(var(--theme-accent-rgb), 0.96), rgba(var(--theme-accent-2-rgb), 0.8));
+  box-shadow: 0 0 18px rgba(var(--theme-accent-rgb), 0.42);
+}
+
+.group.group-reorder-before::before {
+  top: -4px;
+}
+
+.group.group-reorder-after::after {
+  bottom: -4px;
+}
+
 .app-shell[data-drawer-enabled="true"] .group.group-drop-target {
   background: rgba(var(--theme-surface-rgb), 0.08);
   box-shadow: inset 0 0 0 1px rgba(var(--theme-accent-rgb), 0.24);
@@ -578,6 +608,13 @@ dialog {
   padding: 4px 8px;
   border-radius: 10px;
   transition: background .15s ease, color .15s ease;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.app-shell.is-group-dragging .group-title {
+  cursor: grabbing;
 }
 
 .group-title:hover {
@@ -640,6 +677,20 @@ dialog {
   grid-column: span var(--item-col-span, 1);
   grid-row: span var(--item-row-span, 1);
   position: relative;
+}
+
+.tile:focus-visible,
+.add-tile:focus-visible {
+  outline: none;
+}
+
+.tile:focus-visible .icon-wrap,
+.add-tile:focus-visible .add-circle {
+  border-color: rgba(var(--theme-accent-rgb), 0.88);
+  box-shadow:
+    0 0 0 3px rgba(var(--theme-accent-rgb), 0.28),
+    0 0 0 6px rgba(var(--theme-accent-2-rgb), 0.16),
+    0 10px 24px rgba(0, 0, 0, 0.34);
 }
 
 .tile {
@@ -990,6 +1041,27 @@ dialog {
 
 .tile:hover .delete {
   opacity: 1;
+}
+
+.app-shell[data-high-contrast-focus="true"] .tile:focus-visible .icon-wrap,
+.app-shell[data-high-contrast-focus="true"] .add-tile:focus-visible .add-circle,
+.app-shell[data-high-contrast-focus="true"] button:focus-visible,
+.app-shell[data-high-contrast-focus="true"] input:focus-visible,
+.app-shell[data-high-contrast-focus="true"] select:focus-visible {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: 3px;
+  box-shadow:
+    0 0 0 5px rgba(0, 0, 0, 0.42),
+    0 0 0 8px rgba(var(--theme-accent-rgb), 0.32);
+}
+
+.app-shell[data-reduce-motion="true"] *,
+.app-shell[data-reduce-motion="true"] *::before,
+.app-shell[data-reduce-motion="true"] *::after {
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 1ms !important;
 }
 
 .group-grid.drop-target {
@@ -1657,6 +1729,17 @@ input[type="color"]::-webkit-color-swatch {
   transform: translateY(-1px);
   border-color: rgba(var(--theme-accent-rgb), 0.42);
   background: rgba(var(--theme-accent-rgb), 0.16);
+}
+
+.settings-actions button[data-confirming="true"] {
+  border-color: rgba(var(--theme-accent-rgb), 0.72);
+  color: var(--text-color);
+  background:
+    linear-gradient(135deg, rgba(var(--theme-accent-rgb), 0.32), rgba(var(--theme-accent-2-rgb), 0.2)),
+    rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 0 0 2px rgba(var(--theme-accent-rgb), 0.14),
+    0 12px 24px rgba(var(--theme-accent-rgb), 0.12);
 }
 
 menu {

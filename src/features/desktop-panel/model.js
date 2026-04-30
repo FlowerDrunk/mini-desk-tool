@@ -5,7 +5,7 @@ export const DEFAULT_PROFILE_ID = "profile-default";
 export const NEW_AUTO_GROUP = "__new_auto_group__";
 export const DEFAULT_GLOBAL_SHORTCUT = "CommandOrControl+Alt+Space";
 export const TRACK_COUNT_MIN = 1;
-export const TRACK_COUNT_MAX = 4;
+export const TRACK_COUNT_MAX = 9;
 export const DEFAULT_GAP = 14;
 export const WINDOW_WIDTH_MIN = 300;
 export const WINDOW_WIDTH_MAX = 560;
@@ -81,6 +81,8 @@ export function createDefaultState() {
       fontFamily: "noto",
       textColor: DEFAULT_TEXT_COLOR,
       panelOpacity: 78,
+      reduceMotion: false,
+      highContrastFocus: false,
       searchEngine: "bing"
     },
     ui: {
@@ -206,7 +208,10 @@ export function normalizeItem(item) {
     size: SIZE_META[item.size] ? item.size : "1x1",
     iconMode: item.iconMode === "custom" ? "custom" : "default",
     customIcon: String(item.customIcon || "").trim(),
-    shortcutIcon: String(item.shortcutIcon || "").trim()
+    shortcutIcon: String(item.shortcutIcon || "").trim(),
+    iconSource: String(item.iconSource || "").trim(),
+    iconUpdatedAt: String(item.iconUpdatedAt || "").trim(),
+    iconFailureReason: String(item.iconFailureReason || "").trim()
   };
 }
 
@@ -436,6 +441,8 @@ function hydrateLayout(input) {
     fontFamily: sanitizeFontFamily(input?.fontFamily),
     textColor: sanitizeColor(input?.textColor, DEFAULT_TEXT_COLOR),
     panelOpacity: clampNumber(input?.panelOpacity, PANEL_OPACITY_MIN, PANEL_OPACITY_MAX, 78),
+    reduceMotion: input?.reduceMotion === true,
+    highContrastFocus: input?.highContrastFocus === true,
     searchEngine: sanitizeSearchEngine(input?.searchEngine)
   };
 }

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Mini Desk Tool",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "identifier": "com.flowerdrunk.minidesktool",
   "build": {
     "frontendDist": "../renderer-dist",
@@ -36,6 +36,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -46,6 +47,17 @@
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEzOTg1OEZDNDRBRkEyQjMKUldTem9xOUUvRmlZRTlqcm5GbjlJUGNlMkpBdUQwc3NLNUNzNmNOVG5IOVEydXZLcThORkVyM2gK",
+      "endpoints": [
+        "https://github.com/FlowerDrunk/mini-desk-tool/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

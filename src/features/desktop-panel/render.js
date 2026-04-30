@@ -15,6 +15,8 @@ import {
   WINDOW_WIDTH_MIN
 } from "./model.js";
 
+const ISSUE_CENTER_AUTO_HIDE_MS = 5000;
+
 export function registerRenderFeature(app) {
   app.applyLayout = applyLayout;
   app.updateTrackCountHint = updateTrackCountHint;
@@ -35,6 +37,7 @@ export function registerRenderFeature(app) {
   app.clearSelection = clearSelection;
   app.moveSelectedItems = moveSelectedItems;
   app.resizeSelectedItems = resizeSelectedItems;
+  app.refreshSelectedIcons = refreshSelectedIcons;
   app.deleteSelectedItems = deleteSelectedItems;
   app.removeRecentItem = removeRecentItem;
 
@@ -67,6 +70,8 @@ export function registerRenderFeature(app) {
     app.refs.appShell.dataset.flow = app.store.state.layout.flowDirection === "rtl" ? "rtl" : "ltr";
     app.refs.appShell.dataset.showLabels = app.store.state.layout.showItemLabel === false ? "false" : "true";
     app.refs.appShell.dataset.theme = app.store.state.layout.theme || "aurora";
+    app.refs.appShell.dataset.reduceMotion = app.store.state.layout.reduceMotion ? "true" : "false";
+    app.refs.appShell.dataset.highContrastFocus = app.store.state.layout.highContrastFocus ? "true" : "false";
     app.syncDrawerHandle?.();
     updateTrackCountHint();
   }
@@ -141,6 +146,7 @@ export function registerRenderFeature(app) {
 
     app.refreshGroupOptions(app.refs.groupSelect);
     app.refreshGroupOptions(app.refs.editGroupSelect, false);
+    app.refreshGroupOptions(app.refs.organizeGroupSelect, false);
   }
 
   function createGroupTitleNode(group, { isSearching = false, itemCount = group.items.length } = {}) {
@@ -165,6 +171,10 @@ export function registerRenderFeature(app) {
     const title = document.createElement("div");
     title.className = "group-title";
     title.dataset.groupId = group.id;
+    title.addEventListener("pointerdown", (event) => {
+      if (isSearching || event.target.closest("button")) return;
+      app.startGroupPointerDrag?.(event, group.id, title);
+    });
 
     const name = document.createElement("span");
     name.className = "group-title-name";
@@ -215,6 +225,9 @@ export function registerRenderFeature(app) {
     node.dataset.index = String(index);
     node.dataset.size = SIZE_META[sizeKey] ? sizeKey : "1x1";
     node.dataset.recentOnly = recentOnly ? "true" : "false";
+    node.tabIndex = 0;
+    node.setAttribute("role", "button");
+    node.setAttribute("aria-label", recentOnly ? `最近打开：${item.title}` : `打开 ${item.title}`);
     node.classList.toggle("is-selected", app.runtime.selectedItemIds.has(item.id));
     node.classList.toggle("is-selection-mode", app.runtime.selectionMode && !recentOnly);
 
@@ -283,6 +296,10 @@ export function registerRenderFeature(app) {
       toggleItemSelection(item.id);
     });
 
+    node.addEventListener("keydown", (event) => {
+      handleItemKeydown(event, { item, groupId, itemId: item.id, recentOnly });
+    });
+
     deleteButton.addEventListener("click", (event) => {
       event.stopPropagation();
       if (recentOnly) {
@@ -304,6 +321,83 @@ export function registerRenderFeature(app) {
     if (iconWrap) iconWrap.style.pointerEvents = "none";
     if (label) label.style.pointerEvents = "none";
     return node;
+  }
+
+  function handleItemKeydown(event, { item, groupId, itemId, recentOnly }) {
+    const navigationKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
+    if (navigationKeys.includes(event.key)) {
+      event.preventDefault();
+      focusTileFromKey(event.currentTarget, event.key);
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (app.runtime.selectionMode && !recentOnly) {
+        toggleItemSelection(itemId);
+        return;
+      }
+      app.openItem(itemId, item.url);
+      return;
+    }
+
+    if (event.key !== "Delete" && event.key !== "Backspace") return;
+
+    event.preventDefault();
+    const confirmed = window.confirm?.(`确定删除“${item.title}”吗？`);
+    if (!confirmed) return;
+
+    if (recentOnly) {
+      removeRecentItem(itemId);
+      return;
+    }
+    app.removeItem(groupId, itemId);
+  }
+
+  function focusTileFromKey(currentNode, key) {
+    const tiles = Array.from(app.refs.groupsContainer.querySelectorAll(".tile:not([hidden])")).filter(
+      (node) => node instanceof HTMLElement && node.offsetParent !== null
+    );
+    if (!tiles.length) return;
+
+    const currentIndex = tiles.indexOf(currentNode);
+    if (key === "Home") {
+      tiles[0]?.focus();
+      return;
+    }
+    if (key === "End") {
+      tiles[tiles.length - 1]?.focus();
+      return;
+    }
+    if (currentIndex < 0) return;
+
+    if (key === "ArrowLeft" || key === "ArrowRight") {
+      const direction = key === "ArrowLeft" ? -1 : 1;
+      const nextIndex = clampNumber(currentIndex + direction, 0, tiles.length - 1, currentIndex);
+      tiles[nextIndex]?.focus();
+      return;
+    }
+
+    const currentRect = currentNode.getBoundingClientRect();
+    const currentCenterX = currentRect.left + currentRect.width / 2;
+    const currentCenterY = currentRect.top + currentRect.height / 2;
+    const goingDown = key === "ArrowDown";
+    const candidates = tiles
+      .filter((tile) => tile !== currentNode)
+      .map((tile) => {
+        const rect = tile.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        return {
+          tile,
+          dy: centerY - currentCenterY,
+          score: Math.abs(centerX - currentCenterX) + Math.abs(centerY - currentCenterY) * 0.2
+        };
+      })
+      .filter((entry) => (goingDown ? entry.dy > 6 : entry.dy < -6))
+      .sort((a, b) => a.score - b.score);
+
+    candidates[0]?.tile.focus();
   }
 
   function setItemIcon(iconWrap, item) {
@@ -371,11 +465,22 @@ export function registerRenderFeature(app) {
     app.runtime.issues.unshift(issue);
     app.runtime.issues = app.runtime.issues.slice(0, 6);
     syncIssueCenter();
+    scheduleIssueCenterAutoHide();
   }
 
   function clearIssues() {
     app.runtime.issues = [];
+    clearTimeout(app.runtime.issueCenterTimer);
+    app.runtime.issueCenterTimer = null;
     syncIssueCenter();
+  }
+
+  function scheduleIssueCenterAutoHide() {
+    clearTimeout(app.runtime.issueCenterTimer);
+    app.runtime.issueCenterTimer = setTimeout(() => {
+      if (app.refs.issueCenter) app.refs.issueCenter.hidden = true;
+      app.runtime.issueCenterTimer = null;
+    }, ISSUE_CENTER_AUTO_HIDE_MS);
   }
 
   function syncIssueCenter() {
@@ -526,6 +631,41 @@ export function registerRenderFeature(app) {
     }
     app.saveState();
     render();
+  }
+
+  async function refreshSelectedIcons() {
+    const selected = Array.from(app.runtime.selectedItemIds)
+      .map((itemId) => app.findItemById(itemId))
+      .filter(Boolean);
+    if (!selected.length) return;
+
+    if (app.refs.batchRefreshIconsButton) {
+      app.refs.batchRefreshIconsButton.disabled = true;
+      app.refs.batchRefreshIconsButton.textContent = "刷新中...";
+    }
+
+    let success = 0;
+    let skipped = 0;
+    let failed = 0;
+    for (const { group, item } of selected) {
+      const result = await app.refreshItemIcon?.(group.id, item.id);
+      if (result?.ok) {
+        success += 1;
+      } else if (String(result?.reason || "").includes("自定义图标")) {
+        skipped += 1;
+      } else {
+        failed += 1;
+      }
+    }
+
+    app.runtime.selectedItemIds.clear();
+    app.runtime.selectionAnchorGroupId = null;
+    app.runtime.selectionMode = false;
+    render();
+
+    const summary = `批量刷新完成：成功 ${success}，跳过 ${skipped}，失败 ${failed}`;
+    app.showDragToast?.(summary);
+    if (failed || skipped) app.reportIssue?.("批量刷新图标完成", summary);
   }
 
   function deleteSelectedItems() {

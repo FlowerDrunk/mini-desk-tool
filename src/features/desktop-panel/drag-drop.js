@@ -17,6 +17,7 @@ export function registerDragDropFeature(app) {
   app.bindExternalShortcutDrop = bindExternalShortcutDrop;
   app.moveItem = moveItem;
   app.startPointerDrag = startPointerDrag;
+  app.startGroupPointerDrag = startGroupPointerDrag;
   app.updateDropIndicator = updateDropIndicator;
   app.clearDropIndicator = clearDropIndicator;
   app.normalizeViewportPoint = normalizeViewportPoint;
@@ -489,6 +490,117 @@ export function registerDragDropFeature(app) {
     window.addEventListener("pointermove", handlePointerMove, true);
     window.addEventListener("pointerup", finishPointerDrag, true);
     window.addEventListener("pointercancel", cancelPointerDrag, true);
+  }
+
+  function startGroupPointerDrag(event, groupId, titleNode) {
+    if (event.button !== 0) return;
+    if (!(titleNode instanceof HTMLElement)) return;
+    if (app.runtime.pointerDrag || app.runtime.groupPointerDrag || app.runtime.selectionMode) return;
+
+    const groupSection = titleNode.closest(".group");
+    if (!(groupSection instanceof HTMLElement)) return;
+
+    app.runtime.groupPointerDrag = {
+      pointerId: event.pointerId,
+      groupId,
+      titleNode,
+      groupSection,
+      started: false,
+      startX: event.clientX,
+      startY: event.clientY,
+      targetIndex: app.store.state.groups.findIndex((group) => group.id === groupId)
+    };
+
+    const handlePointerMove = (moveEvent) => {
+      const dragState = app.runtime.groupPointerDrag;
+      if (!dragState || moveEvent.pointerId !== dragState.pointerId) return;
+
+      const distance = Math.hypot(moveEvent.clientX - dragState.startX, moveEvent.clientY - dragState.startY);
+      if (!dragState.started && distance < 8) return;
+
+      if (!dragState.started) {
+        dragState.started = true;
+        app.refs.appShell.classList.add("is-group-dragging");
+        dragState.groupSection.classList.add("group-reorder-source");
+      }
+
+      moveEvent.preventDefault();
+      updateGroupReorderTarget(moveEvent.clientY);
+    };
+
+    const finishGroupDrag = (finishEvent) => {
+      const dragState = app.runtime.groupPointerDrag;
+      if (!dragState || finishEvent.pointerId !== dragState.pointerId) return;
+      const wasDragging = dragState.started;
+      if (wasDragging) {
+        finishEvent.preventDefault();
+        reorderGroup(dragState.groupId, dragState.targetIndex);
+      }
+      clearGroupReorderState();
+      cleanup();
+      if (wasDragging) app.render();
+    };
+
+    const cancelGroupDrag = (cancelEvent) => {
+      const dragState = app.runtime.groupPointerDrag;
+      if (!dragState || cancelEvent.pointerId !== dragState.pointerId) return;
+      clearGroupReorderState();
+      cleanup();
+    };
+
+    const cleanup = () => {
+      window.removeEventListener("pointermove", handlePointerMove, true);
+      window.removeEventListener("pointerup", finishGroupDrag, true);
+      window.removeEventListener("pointercancel", cancelGroupDrag, true);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove, true);
+    window.addEventListener("pointerup", finishGroupDrag, true);
+    window.addEventListener("pointercancel", cancelGroupDrag, true);
+  }
+
+  function updateGroupReorderTarget(clientY) {
+    const dragState = app.runtime.groupPointerDrag;
+    if (!dragState) return;
+
+    const groups = Array.from(app.refs.groupsContainer.querySelectorAll(".group")).filter(
+      (node) => node instanceof HTMLElement && node.dataset.groupId
+    );
+    const target = groups.reduce((best, group, index) => {
+      const rect = group.getBoundingClientRect();
+      const centerY = rect.top + rect.height / 2;
+      const distance = Math.abs(clientY - centerY);
+      if (!best || distance < best.distance) return { group, index, distance, before: clientY < centerY };
+      return best;
+    }, null);
+
+    groups.forEach((group) => group.classList.remove("group-reorder-before", "group-reorder-after"));
+    if (!target) return;
+
+    const sourceIndex = groups.findIndex((group) => group.dataset.groupId === dragState.groupId);
+    const rawIndex = target.before ? target.index : target.index + 1;
+    dragState.targetIndex = rawIndex > sourceIndex ? rawIndex - 1 : rawIndex;
+    target.group.classList.add(target.before ? "group-reorder-before" : "group-reorder-after");
+  }
+
+  function reorderGroup(groupId, targetIndex) {
+    const groups = app.store.state.groups;
+    const fromIndex = groups.findIndex((group) => group.id === groupId);
+    if (fromIndex < 0) return;
+    const safeIndex = clampNumber(targetIndex, 0, groups.length - 1, fromIndex);
+    if (fromIndex === safeIndex) return;
+    const [group] = groups.splice(fromIndex, 1);
+    groups.splice(safeIndex, 0, group);
+    app.saveState();
+    app.showDragToast?.("分组顺序已调整");
+  }
+
+  function clearGroupReorderState() {
+    app.refs.groupsContainer
+      ?.querySelectorAll(".group-reorder-source, .group-reorder-before, .group-reorder-after")
+      .forEach((group) => group.classList.remove("group-reorder-source", "group-reorder-before", "group-reorder-after"));
+    app.refs.appShell.classList.remove("is-group-dragging");
+    app.runtime.groupPointerDrag = null;
   }
 
   function createDragPreview(sourceNode, clientX, clientY) {

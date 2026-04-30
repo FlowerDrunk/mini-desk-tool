@@ -10,6 +10,7 @@ export function registerIconFeature(app) {
   app.rotateIconSuggestions = rotateIconSuggestions;
   app.selectSuggestedIcon = selectSuggestedIcon;
   app.getOriginalIconCandidate = getOriginalIconCandidate;
+  app.refreshItemIcon = refreshItemIcon;
 
   function getIconPicker(type) {
     return app.runtime.iconPickers[type === "edit" ? "edit" : "add"];
@@ -240,6 +241,59 @@ export function registerIconFeature(app) {
     setIconSearchStatus(type, totalCount ? `已准备 ${totalCount} 个候选图标` : "没有找到合适图标");
     updateRefreshButtonState(type);
     renderIconSuggestions(type);
+  }
+
+  async function refreshItemIcon(groupId, itemId) {
+    const item = app.findItem(groupId, itemId);
+    if (!item) return { ok: false, reason: "图标不存在" };
+    if (item.iconMode === "custom" && item.customIcon) {
+      item.iconFailureReason = "当前使用自定义图标，已保留不覆盖";
+      item.iconUpdatedAt = new Date().toISOString();
+      app.saveState();
+      app.updateIconResourceFields?.();
+      return { ok: false, reason: "当前使用自定义图标，已保留不覆盖" };
+    }
+
+    const query = repairDisplayText(`${item.title} ${item.description || ""} ${safeHost(item.url)}`.trim());
+    let suggestions = [];
+    try {
+      suggestions = (await app.desktopPanel?.searchIconSuggestions?.(query)) || [];
+    } catch {
+      setIconRefreshFailure(item, "搜索图标失败，请稍后重试");
+      return { ok: false, reason: "搜索图标失败，请稍后重试" };
+    }
+
+    const candidate = Array.isArray(suggestions)
+      ? suggestions.find((entry) => entry?.url && entry.url !== item.customIcon)
+      : null;
+    if (!candidate?.url) {
+      setIconRefreshFailure(item, "没有找到可用候选图标");
+      return { ok: false, reason: "没有找到可用候选图标" };
+    }
+
+    const latest = app.findItem(groupId, itemId);
+    if (!latest) return { ok: false, reason: "图标已不存在" };
+    if (latest.iconMode === "custom" && latest.customIcon) {
+      setIconRefreshFailure(latest, "当前使用自定义图标，已保留不覆盖");
+      return { ok: false, reason: "当前使用自定义图标，已保留不覆盖" };
+    }
+
+    latest.iconMode = "custom";
+    latest.customIcon = String(candidate.url || "").trim();
+    latest.iconSource = repairDisplayText(String(candidate.name || "候选图标").trim() || "候选图标");
+    latest.iconUpdatedAt = new Date().toISOString();
+    latest.iconFailureReason = "";
+    app.saveState();
+    app.updateIconResourceFields?.();
+    app.render();
+    return { ok: true, name: repairDisplayText(String(candidate.name || latest.title || "候选图标")) };
+  }
+
+  function setIconRefreshFailure(item, reason) {
+    item.iconFailureReason = reason;
+    item.iconUpdatedAt = new Date().toISOString();
+    app.saveState();
+    app.updateIconResourceFields?.();
   }
 
   function scheduleOfficialLinkSearch(type, rawDescription) {

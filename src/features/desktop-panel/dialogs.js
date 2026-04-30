@@ -61,8 +61,10 @@ export function registerDialogFeature(app) {
   app.openEditDialog = openEditDialog;
   app.syncEditDialogFields = syncEditDialogFields;
   app.syncSettingsDialogFields = syncSettingsDialogFields;
+  app.updateIconResourceFields = updateIconResourceFields;
   app.openSettings = openSettings;
   app.syncWindowBehavior = syncWindowBehavior;
+  app.checkForUpdates = checkForUpdates;
   app.hideMenus = hideMenus;
   app.hasVisibleMenu = hasVisibleMenu;
   app.openMenu = openMenu;
@@ -171,6 +173,19 @@ export function registerDialogFeature(app) {
       app.saveState();
       updateAppearanceHint();
     });
+    app.refs.reduceMotionInput?.addEventListener("change", () => {
+      app.store.state.layout.reduceMotion = app.refs.reduceMotionInput.checked;
+      app.applyLayout();
+      app.saveState();
+      void syncWindowBehavior();
+      updateAppearanceHint();
+    });
+    app.refs.highContrastFocusInput?.addEventListener("change", () => {
+      app.store.state.layout.highContrastFocus = app.refs.highContrastFocusInput.checked;
+      app.applyLayout();
+      app.saveState();
+      updateAppearanceHint();
+    });
     app.refs.fontFamilySelect?.addEventListener("change", () => {
       app.store.state.layout.fontFamily = sanitizeFontFamily(app.refs.fontFamilySelect.value);
       app.applyLayout();
@@ -202,10 +217,14 @@ export function registerDialogFeature(app) {
     app.refs.batchResizeButton?.addEventListener("click", () => {
       app.resizeSelectedItems(app.refs.batchSizeSelect?.value || "1x1");
     });
+    app.refs.batchRefreshIconsButton?.addEventListener("click", () => {
+      void app.refreshSelectedIcons?.();
+    });
     app.refs.batchDeleteButton?.addEventListener("click", () => {
       app.deleteSelectedItems();
     });
     app.refs.batchClearButton?.addEventListener("click", () => app.clearSelection());
+    app.refs.clearIconFailuresButton?.addEventListener("click", () => clearIconFailureRecords());
 
     app.refs.addForm.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -250,6 +269,8 @@ export function registerDialogFeature(app) {
       const nextSize = app.refs.editSizeSelect.value;
       const nextIconMode = app.refs.editIconModeSelect.value === "custom" ? "custom" : "default";
       const nextCustomIcon = app.refs.editCustomIconInput.value.trim();
+      const previousIconMode = item.iconMode;
+      const previousCustomIcon = item.customIcon || "";
 
       if (!nextTitle || !nextUrl || !app.sizeMeta[nextSize]) return;
 
@@ -259,6 +280,14 @@ export function registerDialogFeature(app) {
       item.size = nextSize;
       item.iconMode = nextIconMode;
       item.customIcon = nextIconMode === "custom" ? nextCustomIcon : "";
+      item.iconFailureReason = "";
+      if (nextIconMode === "default") {
+        item.iconSource = "";
+        item.iconUpdatedAt = "";
+      } else if (nextCustomIcon && (previousIconMode !== "custom" || previousCustomIcon !== nextCustomIcon)) {
+        item.iconSource = "手动设置";
+        item.iconUpdatedAt = new Date().toISOString();
+      }
 
       if (nextGroupId && nextGroupId !== app.runtime.activeItemContext.groupId) {
         app.moveItem(
@@ -383,6 +412,11 @@ export function registerDialogFeature(app) {
         group.items.splice(index + 1, 0, { ...structuredClone(item), id: crypto.randomUUID() });
         app.saveState();
         app.render();
+        return;
+      }
+
+      if (action === "refresh-icon") {
+        void refreshItemIconFromMenu(context.groupId, context.itemId);
         return;
       }
 
@@ -634,15 +668,36 @@ export function registerDialogFeature(app) {
 
     app.refs.exportDataButton?.addEventListener("click", () => void exportDataToFile());
     app.refs.importDataButton?.addEventListener("click", () => void importDataFromFile());
-    app.refs.importDesktopButton?.addEventListener("click", () => void importShortcutLocation("desktop"));
+    app.refs.importDesktopButton?.addEventListener("click", () => {
+      if (!confirmInlineAction({
+        id: "import-desktop",
+        button: app.refs.importDesktopButton,
+        status: "再次点击“导入桌面”将扫描桌面快捷方式，并添加到当前第一个分组；不会删除现有图标。",
+        statusRef: app.refs.dataActionStatus,
+        confirmText: "再次点击导入"
+      })) return;
+      void importShortcutLocation("desktop");
+    });
     app.refs.importStartMenuButton?.addEventListener("click", () => void importShortcutLocation("startMenu"));
     app.refs.autoGroupButton.addEventListener("click", () => {
       autoGroupByContent();
       app.saveState();
       app.render();
     });
-    app.refs.closeWindowButton.addEventListener("click", () => app.desktopPanel?.closeWindow?.());
-
+    app.refs.sortGroupByNameButton?.addEventListener("click", () => sortSelectedGroupByName());
+    app.refs.sortAllGroupsByNameButton?.addEventListener("click", () => sortAllGroupsByName());
+    app.refs.compactGroupButton?.addEventListener("click", () => compactSelectedGroup());
+    app.refs.findDuplicateItemsButton?.addEventListener("click", () => findDuplicateItems());
+    app.refs.suggestGroupsButton?.addEventListener("click", () => applyGroupSuggestions());
+    app.refs.checkUpdatesButton?.addEventListener("click", () => {
+      void checkForUpdates({ silent: false });
+    });
+    app.refs.installUpdateButton?.addEventListener("click", () => {
+      void installAvailableUpdate();
+    });
+    app.refs.copyFeedbackSummaryButton?.addEventListener("click", () => {
+      void copyFeedbackSummary();
+    });
     app.bindExternalShortcutDrop();
   }
 
@@ -986,10 +1041,22 @@ export function registerDialogFeature(app) {
     app.refs.editCustomIconField.hidden = !isCustom;
     app.refs.editCustomIconInput.toggleAttribute("required", isCustom);
     if (!isCustom) app.runtime.iconPickers.edit.selectedUrl = "";
-    app.refs.editIconModeHint.textContent = shortcutIcon
+    app.refs.editIconModeHint.textContent = getIconModeHint(shortcutIcon);
+    app.renderIconSuggestions("edit");
+  }
+
+  function getIconModeHint(shortcutIcon = "") {
+    const item = app.runtime.activeItemContext
+      ? app.findItem(app.runtime.activeItemContext.groupId, app.runtime.activeItemContext.itemId)
+      : null;
+    if (item?.iconFailureReason) return `上次刷新失败：${item.iconFailureReason}`;
+    if (item?.iconUpdatedAt) {
+      const source = item.iconSource || (item.iconMode === "custom" ? "自定义图标" : "默认图标");
+      return `图标来源：${source}，更新时间：${new Date(item.iconUpdatedAt).toLocaleString()}`;
+    }
+    return shortcutIcon
       ? "默认会优先保留该快捷方式原有图标。"
       : "默认会优先使用更清晰的网站站点图标。";
-    app.renderIconSuggestions("edit");
   }
 
   async function syncSettingsDialogFields() {
@@ -1005,6 +1072,12 @@ export function registerDialogFeature(app) {
       app.refs.panelOpacityInput.value = String(
         clampNumber(app.store.state.layout.panelOpacity, PANEL_OPACITY_MIN, PANEL_OPACITY_MAX, 78)
       );
+    }
+    if (app.refs.reduceMotionInput) {
+      app.refs.reduceMotionInput.checked = !!app.store.state.layout.reduceMotion;
+    }
+    if (app.refs.highContrastFocusInput) {
+      app.refs.highContrastFocusInput.checked = !!app.store.state.layout.highContrastFocus;
     }
     if (app.refs.fontFamilySelect) {
       app.refs.fontFamilySelect.value = sanitizeFontFamily(app.store.state.layout.fontFamily);
@@ -1048,6 +1121,9 @@ export function registerDialogFeature(app) {
       app.refs.drawerDelayInput.value = String(app.store.state.app.drawerCollapseDelay || 450);
     }
     updateWindowBehaviorHints();
+    updateReleaseFields();
+    updateOrganizeFields();
+    updateIconResourceFields();
     app.syncDrawerHandle?.();
     if (app.refs.globalShortcutEnabledInput) {
       app.refs.globalShortcutEnabledInput.checked = !!app.store.state.app.globalShortcutEnabled;
@@ -1074,6 +1150,437 @@ export function registerDialogFeature(app) {
   async function syncWindowBehavior() {
     await syncNativeWindowBehavior();
     await syncGlobalShortcut();
+  }
+
+  function updateOrganizeFields() {
+    app.refreshGroupOptions?.(app.refs.organizeGroupSelect, false);
+    if (app.refs.organizeStatus && !app.refs.organizeStatus.dataset.keepMessage) {
+      app.refs.organizeStatus.textContent = "整理操作只调整顺序或给出建议，不会删除图标。";
+    }
+  }
+
+  function updateIconResourceFields() {
+    const failures = app.store.state.groups.flatMap((group) => group.items).filter((item) => item.iconFailureReason);
+    if (app.refs.iconResourceSummary) {
+      app.refs.iconResourceSummary.textContent = failures.length ? `${failures.length} 条失败记录` : "暂无失败记录";
+    }
+    if (app.refs.iconResourceStatus && !app.refs.iconResourceStatus.dataset.keepMessage) {
+      app.refs.iconResourceStatus.textContent = "清理失败记录不会删除自定义图标。";
+    }
+  }
+
+  function clearIconFailureRecords() {
+    let count = 0;
+    app.store.state.groups.forEach((group) => {
+      group.items.forEach((item) => {
+        if (!item.iconFailureReason) return;
+        item.iconFailureReason = "";
+        count += 1;
+      });
+    });
+    app.saveState();
+    if (app.refs.iconResourceStatus) {
+      app.refs.iconResourceStatus.dataset.keepMessage = "true";
+      app.refs.iconResourceStatus.textContent = count ? `已清理 ${count} 条图标失败记录。` : "暂无需要清理的失败记录。";
+    }
+    updateIconResourceFields();
+    app.showDragToast(count ? "图标失败记录已清理" : "暂无失败记录");
+  }
+
+  function sortSelectedGroupByName() {
+    const groupId = app.refs.organizeGroupSelect?.value || app.store.state.groups[0]?.id;
+    const group = app.findGroup(groupId);
+    if (!group) return;
+    if (group.items.length < 2) {
+      setOrganizeStatus(`${group.name} 不需要排序。`);
+      return;
+    }
+    const confirmed = confirmInlineAction({
+      id: `sort-group:${group.id}`,
+      button: app.refs.sortGroupByNameButton,
+      status: `再次点击“排序本组”，将按名称整理“${group.name}”中的 ${group.items.length} 个图标；不会删除图标。`,
+      confirmText: "再次点击确认"
+    });
+    if (!confirmed) return;
+
+    const changed = sortGroupItemsByName(group);
+    if (changed) {
+      app.saveState();
+      app.render();
+      setOrganizeStatus(`已按名称整理“${group.name}”。`);
+      app.showDragToast("分组已排序");
+    } else {
+      setOrganizeStatus(`“${group.name}”已经是名称顺序。`);
+    }
+  }
+
+  function sortAllGroupsByName() {
+    const groupsWithItems = app.store.state.groups.filter((group) => group.items.length > 1);
+    if (!groupsWithItems.length) {
+      setOrganizeStatus("当前没有需要排序的分组。");
+      return;
+    }
+    const itemCount = groupsWithItems.reduce((sum, group) => sum + group.items.length, 0);
+    const confirmed = confirmInlineAction({
+      id: "sort-all-groups",
+      button: app.refs.sortAllGroupsByNameButton,
+      status: `再次点击“排序全部”，将按名称整理 ${groupsWithItems.length} 个分组中的 ${itemCount} 个图标；不会删除图标。`,
+      confirmText: "再次点击确认"
+    });
+    if (!confirmed) return;
+
+    const changedCount = groupsWithItems.reduce((sum, group) => sum + (sortGroupItemsByName(group) ? 1 : 0), 0);
+    if (changedCount) {
+      app.saveState();
+      app.render();
+      setOrganizeStatus(`已整理 ${changedCount} 个分组。`);
+      app.showDragToast("全部分组已排序");
+    } else {
+      setOrganizeStatus("所有分组已经是名称顺序。");
+    }
+  }
+
+  function compactSelectedGroup() {
+    const groupId = app.refs.organizeGroupSelect?.value || app.store.state.groups[0]?.id;
+    const group = app.findGroup(groupId);
+    if (!group) return;
+    if (group.items.length < 2) {
+      setOrganizeStatus(`${group.name} 不需要紧凑排列。`);
+      return;
+    }
+
+    const confirmed = confirmInlineAction({
+      id: `compact-group:${group.id}`,
+      button: app.refs.compactGroupButton,
+      status: `再次点击“紧凑本组”，将把“${group.name}”中的大图标优先排列，尽量减少视觉空位；不会删除图标。`,
+      confirmText: "再次点击确认"
+    });
+    if (!confirmed) return;
+
+    const changed = compactGroupItems(group);
+    if (changed) {
+      app.saveState();
+      app.render();
+      setOrganizeStatus(`已紧凑排列“${group.name}”。`);
+      app.showDragToast("分组已紧凑排列");
+    } else {
+      setOrganizeStatus(`“${group.name}”已经是紧凑顺序。`);
+    }
+  }
+
+  function sortGroupItemsByName(group) {
+    const before = group.items.map((item) => item.id).join("\n");
+    group.items = group.items
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) => compareItemName(a.item, b.item) || a.index - b.index)
+      .map(({ item }) => item);
+    return before !== group.items.map((item) => item.id).join("\n");
+  }
+
+  function compactGroupItems(group) {
+    const before = group.items.map((item) => item.id).join("\n");
+    group.items = group.items
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) => getItemArea(b.item) - getItemArea(a.item) || compareItemName(a.item, b.item) || a.index - b.index)
+      .map(({ item }) => item);
+    return before !== group.items.map((item) => item.id).join("\n");
+  }
+
+  function getItemArea(item) {
+    const meta = app.sizeMeta?.[item.size] || app.sizeMeta?.["1x1"];
+    return (meta?.colSpan || 1) * (meta?.rowSpan || 1);
+  }
+
+  function compareItemName(left, right) {
+    return String(left.title || "").localeCompare(String(right.title || ""), "zh-Hans-CN", {
+      numeric: true,
+      sensitivity: "base"
+    });
+  }
+
+  function findDuplicateItems() {
+    const duplicates = collectDuplicateItems();
+    if (!duplicates.length) {
+      setOrganizeStatus("未发现明显重复项。");
+      app.showDragToast("未发现重复项");
+      return;
+    }
+
+    const preview = duplicates
+      .slice(0, 3)
+      .map((entry) => `${entry.label}（${entry.items.length} 个）`)
+      .join("；");
+    const suffix = duplicates.length > 3 ? `，另有 ${duplicates.length - 3} 组` : "";
+    setOrganizeStatus(`发现 ${duplicates.length} 组可能重复项：${preview}${suffix}。请手动确认后再处理。`);
+    app.reportIssue?.("发现可能重复项", `${preview}${suffix}`);
+  }
+
+  function applyGroupSuggestions() {
+    const suggestions = buildGroupSuggestions();
+    if (!suggestions.length) {
+      setOrganizeStatus("暂无可应用的分组建议。");
+      app.showDragToast("暂无分组建议");
+      return;
+    }
+
+    const itemCount = suggestions.reduce((sum, suggestion) => sum + suggestion.items.length, 0);
+    const preview = suggestions
+      .slice(0, 3)
+      .map((suggestion) => `${suggestion.name} ${suggestion.items.length} 个`)
+      .join("，");
+    const suffix = suggestions.length > 3 ? `，另有 ${suggestions.length - 3} 组` : "";
+    const confirmed = confirmInlineAction({
+      id: "apply-group-suggestions",
+      button: app.refs.suggestGroupsButton,
+      status: `建议新建 ${suggestions.length} 个分组，移动 ${itemCount} 个图标：${preview}${suffix}。再次点击将应用建议，不会删除图标。`,
+      confirmText: "再次点击应用"
+    });
+    if (!confirmed) return;
+
+    suggestions.forEach((suggestion) => {
+      app.store.state.groups.push({
+        id: crypto.randomUUID(),
+        name: uniqueGroupName(app.store, suggestion.name),
+        items: suggestion.items
+      });
+      suggestion.items.forEach((item) => {
+        const sourceGroup = app.findItemById(item.id)?.group;
+        if (!sourceGroup) return;
+        sourceGroup.items = sourceGroup.items.filter((entry) => entry.id !== item.id);
+      });
+    });
+
+    app.ensureValidGroups();
+    app.saveState();
+    app.render();
+    setOrganizeStatus(`已应用 ${suggestions.length} 个分组建议，移动 ${itemCount} 个图标。`);
+    app.showDragToast("分组建议已应用");
+  }
+
+  function buildGroupSuggestions() {
+    const suggestions = new Map();
+    app.store.state.groups.forEach((group) => {
+      group.items.forEach((item) => {
+        const suggestedName = inferGroupName(item.title, item.url, item.description);
+        if (!suggestedName || suggestedName === "常用" || suggestedName === group.name) return;
+        if (!suggestions.has(suggestedName)) suggestions.set(suggestedName, []);
+        suggestions.get(suggestedName).push(item);
+      });
+    });
+
+    return Array.from(suggestions.entries())
+      .map(([name, items]) => ({ name, items }))
+      .filter((suggestion) => suggestion.items.length >= 2);
+  }
+
+  function collectDuplicateItems() {
+    const maps = {
+      target: new Map(),
+      title: new Map()
+    };
+
+    app.store.state.groups.forEach((group) => {
+      group.items.forEach((item) => {
+        const located = { groupName: group.name, item };
+        const targetKey = normalizeOrganizeKey(item.url);
+        const titleKey = normalizeOrganizeKey(item.title);
+        if (targetKey) pushDuplicateCandidate(maps.target, `目标：${item.url}`, targetKey, located);
+        if (titleKey) pushDuplicateCandidate(maps.title, `名称：${item.title}`, titleKey, located);
+      });
+    });
+
+    const seen = new Set();
+    return Object.values(maps)
+      .flatMap((map) => Array.from(map.values()).filter((entry) => entry.items.length > 1))
+      .filter((entry) => {
+        const ids = entry.items.map(({ item }) => item.id).sort().join("|");
+        if (seen.has(ids)) return false;
+        seen.add(ids);
+        return true;
+      });
+  }
+
+  function pushDuplicateCandidate(map, label, key, item) {
+    if (!map.has(key)) map.set(key, { label, items: [] });
+    map.get(key).items.push(item);
+  }
+
+  function normalizeOrganizeKey(value) {
+    return String(value || "")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/+$/g, "")
+      .toLowerCase();
+  }
+
+  function setOrganizeStatus(message) {
+    setStatusText(app.refs.organizeStatus, message);
+  }
+
+  function confirmInlineAction({ id, button, status, statusRef = app.refs.organizeStatus, confirmText = "再次点击确认", timeout = 4200 }) {
+    const sameAction = app.runtime.pendingInlineConfirm === id;
+    clearInlineConfirm();
+    if (sameAction) return true;
+
+    app.runtime.pendingInlineConfirm = id;
+    if (button) {
+      button.dataset.confirming = "true";
+      button.dataset.defaultText = button.textContent || "";
+      button.textContent = confirmText;
+    }
+    setStatusText(statusRef, status);
+    app.runtime.inlineConfirmTimer = setTimeout(() => {
+      clearInlineConfirm();
+      setStatusText(statusRef, statusRef === app.refs.dataActionStatus
+        ? "导入桌面会扫描桌面快捷方式，执行前需要二次确认。"
+        : "整理操作只调整顺序或给出建议，不会删除图标。");
+    }, timeout);
+    return false;
+  }
+
+  function setStatusText(statusRef, message) {
+    if (!statusRef) return;
+    if (message === "整理操作只调整顺序或给出建议，不会删除图标。") {
+      delete statusRef.dataset.keepMessage;
+    } else {
+      statusRef.dataset.keepMessage = "true";
+    }
+    statusRef.textContent = message;
+  }
+
+  function clearInlineConfirm() {
+    clearTimeout(app.runtime.inlineConfirmTimer);
+    app.runtime.inlineConfirmTimer = null;
+    app.runtime.pendingInlineConfirm = null;
+    [
+      app.refs.sortGroupByNameButton,
+      app.refs.sortAllGroupsByNameButton,
+      app.refs.compactGroupButton,
+      app.refs.suggestGroupsButton,
+      app.refs.importDesktopButton
+    ].forEach((button) => {
+      if (!button?.dataset.confirming) return;
+      button.textContent = button.dataset.defaultText || button.textContent;
+      delete button.dataset.confirming;
+      delete button.dataset.defaultText;
+    });
+  }
+
+  function updateReleaseFields() {
+    if (app.refs.appVersionLabel) {
+      app.refs.appVersionLabel.textContent = `当前版本 v${app.version}`;
+    }
+    if (app.refs.checkUpdatesButton) {
+      app.refs.checkUpdatesButton.disabled = !!app.runtime.updateChecking || !!app.runtime.updateInstalling;
+      app.refs.checkUpdatesButton.textContent = app.runtime.updateChecking ? "检查中..." : "检查更新";
+    }
+    if (app.refs.installUpdateButton) {
+      const hasUpdate = !!app.runtime.updateInfo?.available;
+      app.refs.installUpdateButton.hidden = !hasUpdate;
+      app.refs.installUpdateButton.disabled = !!app.runtime.updateInstalling;
+      app.refs.installUpdateButton.textContent = app.runtime.updateInstalling ? "安装中..." : "立即安装";
+    }
+    if (app.refs.feedbackSummaryStatus) {
+      app.refs.feedbackSummaryStatus.textContent = getUpdateStatusText();
+    }
+  }
+
+  function getUpdateStatusText() {
+    if (app.runtime.updateInstalling) return "正在安装更新，Windows 安装流程会自动退出当前应用。";
+    if (app.runtime.updateChecking) return "正在检查 GitHub Releases 更新...";
+    if (app.runtime.updateInfo?.available) {
+      const version = app.runtime.updateInfo.version ? ` v${app.runtime.updateInfo.version}` : "";
+      const notes = app.runtime.updateInfo.notes ? `：${String(app.runtime.updateInfo.notes).slice(0, 80)}` : "";
+      return `发现新版本${version}${notes}`;
+    }
+    if (app.runtime.updateInfo?.checked) return "当前已是最新版本。";
+    if (app.runtime.updateInfo?.error) return `检查更新失败：${app.runtime.updateInfo.error}`;
+    return "可手动检查 GitHub Releases 更新；反馈摘要不会包含图标、路径、备份内容或配置数据。";
+  }
+
+  function formatUpdateError(error) {
+    const message = error?.message || String(error || "");
+    if (/valid release json|release json|latest\.json|manifest/i.test(message)) {
+      return "未获取到有效更新清单 latest.json，请确认最新 GitHub Release 已上传 latest.json、安装包和 .sig 签名文件。";
+    }
+    if (/fetch|network|offline|timed?\s*out|proxy|dns|connection/i.test(message)) {
+      return "网络连接失败，请稍后重试，或打开 GitHub Releases 手动查看更新。";
+    }
+    return message || "检查更新失败，请稍后重试。";
+  }
+
+  async function checkForUpdates({ silent = false } = {}) {
+    if (app.runtime.updateChecking || app.runtime.updateInstalling) return app.runtime.updateInfo;
+    app.runtime.updateChecking = true;
+    if (!silent) app.runtime.updateInfo = { checked: false };
+    updateReleaseFields();
+
+    try {
+      const result = await app.desktopPanel?.checkForUpdate?.();
+      app.runtime.updateInfo = result?.available
+        ? {
+            available: true,
+            version: String(result.version || ""),
+            notes: String(result.notes || ""),
+            date: String(result.date || ""),
+            checked: true
+          }
+        : { available: false, checked: true };
+      if (app.runtime.updateInfo.available) {
+        app.showDragToast(`发现新版本 v${app.runtime.updateInfo.version || ""}`.trim());
+      } else if (!silent) {
+        app.showDragToast("当前已是最新版本");
+      }
+    } catch (error) {
+      const formattedError = formatUpdateError(error);
+      app.runtime.updateInfo = {
+        available: false,
+        checked: false,
+        error: formattedError,
+        rawError: error?.message || String(error)
+      };
+      if (!silent) {
+        app.showDragToast("检查更新失败");
+      } else {
+        app.reportIssue?.("检查更新失败", formattedError);
+      }
+    } finally {
+      app.runtime.updateChecking = false;
+      updateReleaseFields();
+    }
+
+    return app.runtime.updateInfo;
+  }
+
+  async function installAvailableUpdate() {
+    if (!app.runtime.updateInfo?.available || app.runtime.updateInstalling) return;
+    const version = app.runtime.updateInfo.version ? ` v${app.runtime.updateInfo.version}` : "";
+    const confirmed = window.confirm?.(`发现新版本${version}，是否现在下载并安装？安装时应用会退出。`);
+    if (!confirmed) return;
+
+    app.runtime.updateInstalling = true;
+    updateReleaseFields();
+
+    try {
+      await app.desktopPanel?.installUpdate?.((event) => {
+        if (!app.refs.feedbackSummaryStatus) return;
+        if (event?.event === "Started") {
+          app.refs.feedbackSummaryStatus.textContent = "开始下载更新...";
+        } else if (event?.event === "Progress") {
+          app.refs.feedbackSummaryStatus.textContent = "正在下载更新...";
+        } else if (event?.event === "Finished") {
+          app.refs.feedbackSummaryStatus.textContent = "下载完成，正在安装...";
+        }
+      });
+    } catch (error) {
+      app.runtime.updateInstalling = false;
+      app.runtime.updateInfo = {
+        ...app.runtime.updateInfo,
+        error: error?.message || String(error)
+      };
+      app.reportIssue?.("安装更新失败", error?.message || String(error));
+      updateReleaseFields();
+    }
   }
 
   function handleGlobalShortcutCapture(event) {
@@ -1132,7 +1639,8 @@ export function registerDialogFeature(app) {
       revealDelayMs: clampNumber(app.store.state.app.revealDelay, REVEAL_DELAY_MIN, REVEAL_DELAY_MAX, 250),
       drawerEnabled: !!app.store.state.app.drawerModeEnabled,
       drawerEdge: sanitizeSnapEdge(app.store.state.app.drawerEdge),
-      drawerDelayMs: clampNumber(app.store.state.app.drawerCollapseDelay, DRAWER_DELAY_MIN, DRAWER_DELAY_MAX, 450)
+      drawerDelayMs: clampNumber(app.store.state.app.drawerCollapseDelay, DRAWER_DELAY_MIN, DRAWER_DELAY_MAX, 450),
+      reduceMotion: !!app.store.state.layout.reduceMotion
     });
   }
 
@@ -1196,7 +1704,7 @@ export function registerDialogFeature(app) {
     const section = app.refs.settingsDialog?.querySelector?.(`[data-settings-section="${sectionName}"]`);
     if (!section) return;
 
-    section.scrollIntoView({ block: "start", behavior: "smooth" });
+    section.scrollIntoView({ block: "start", behavior: app.store.state.layout.reduceMotion ? "auto" : "smooth" });
     section.setAttribute("tabindex", "-1");
     section.focus({ preventScroll: true });
 
@@ -1267,6 +1775,59 @@ export function registerDialogFeature(app) {
     }
   }
 
+  async function copyFeedbackSummary() {
+    try {
+      await copyText(buildFeedbackSummary());
+      if (app.refs.feedbackSummaryStatus) {
+        app.refs.feedbackSummaryStatus.textContent = "反馈摘要已复制，可粘贴到 GitHub Issue 或聊天窗口。";
+      }
+      app.showDragToast("反馈摘要已复制");
+    } catch (error) {
+      if (app.refs.feedbackSummaryStatus) {
+        app.refs.feedbackSummaryStatus.textContent = "复制失败，请稍后重试。";
+      }
+      app.reportIssue?.("复制反馈摘要失败", error?.message || String(error));
+    }
+  }
+
+  function buildFeedbackSummary() {
+    const layout = app.store.state.layout;
+    const appConfig = app.store.state.app;
+    const safeSettings = {
+      layoutPreset: layout.layoutPreset,
+      theme: layout.theme,
+      fontFamily: layout.fontFamily,
+      showSearch: layout.showSearch !== false,
+      showRecent: layout.showRecent !== false,
+      showItemLabel: layout.showItemLabel !== false,
+      trackCount: layout.trackCount,
+      reduceMotion: !!layout.reduceMotion,
+      highContrastFocus: !!layout.highContrastFocus,
+      snapToEdge: !!appConfig.snapToEdge,
+      autoHideOnBlur: !!appConfig.autoHideOnBlur,
+      snapEdge: appConfig.snapEdge,
+      drawerModeEnabled: !!appConfig.drawerModeEnabled,
+      drawerEdge: appConfig.drawerEdge,
+      drawerTrigger: appConfig.drawerTrigger,
+      globalShortcutEnabled: !!appConfig.globalShortcutEnabled,
+      autoBackupEnabled: !!appConfig.autoBackupEnabled
+    };
+
+    return [
+      "Mini Desk Tool 反馈摘要",
+      `版本：v${app.version}`,
+      `时间：${new Date().toISOString()}`,
+      `平台：${navigator.platform || "unknown"}`,
+      `用户代理：${navigator.userAgent || "unknown"}`,
+      `视口：${window.innerWidth}x${window.innerHeight}`,
+      "",
+      "关键设置：",
+      JSON.stringify(safeSettings, null, 2),
+      "",
+      "隐私说明：此摘要不包含图标列表、网址、文件路径、备份目录或完整配置数据。"
+    ].join("\n");
+  }
+
   async function copyText(text) {
     if (!text.trim()) throw new Error("copy text is empty");
     if (navigator.clipboard?.writeText) {
@@ -1293,6 +1854,18 @@ export function registerDialogFeature(app) {
     } catch (error) {
       app.reportIssue(failureMessage, error?.message || String(error));
     }
+  }
+
+  async function refreshItemIconFromMenu(groupId, itemId) {
+    app.showDragToast("正在刷新图标...");
+    const result = await app.refreshItemIcon?.(groupId, itemId);
+    if (result?.ok) {
+      app.showDragToast(`图标已刷新：${result.name || "候选图标"}`);
+      return;
+    }
+    const reason = result?.reason || "没有找到可用候选图标";
+    app.showDragToast("图标刷新失败");
+    app.reportIssue?.("图标刷新失败", reason);
   }
 
   function hideMenus() {

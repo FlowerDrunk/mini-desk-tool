@@ -14,16 +14,22 @@ import {
   WINDOW_WIDTH_MIN,
   SEARCH_ENGINES
 } from "./model.js";
+import packageInfo from "../../../package.json";
 import { registerDialogFeature } from "./dialogs.js";
 import { registerDragDropFeature } from "./drag-drop.js";
 import { registerIconFeature } from "./icons.js";
 import { registerRenderFeature } from "./render.js";
 import { registerWindowShellFeature } from "./window-shell.js";
 
+export const APP_VERSION = packageInfo.version || "0.0.0";
+export const RELEASES_URL = "https://github.com/FlowerDrunk/mini-desk-tool/releases";
+
 export function createDesktopPanelApp({ desktopPanel = window.desktopPanel } = {}) {
   const refs = createRefs();
   const app = {
     desktopPanel,
+    version: APP_VERSION,
+    releasesUrl: RELEASES_URL,
     refs,
     sizeMeta: SIZE_META,
     store: {
@@ -32,6 +38,7 @@ export function createDesktopPanelApp({ desktopPanel = window.desktopPanel } = {
     runtime: {
       dragData: null,
       pointerDrag: null,
+      groupPointerDrag: null,
       preventNextClickItemId: null,
       preventNextClickTimer: null,
       dragPreviewElement: null,
@@ -42,6 +49,7 @@ export function createDesktopPanelApp({ desktopPanel = window.desktopPanel } = {
       addDialogSource: "tile",
       dropIndicator: null,
       dragToastTimer: null,
+      issueCenterTimer: null,
       issues: [],
       searchQuery: "",
       recentPage: 0,
@@ -52,6 +60,11 @@ export function createDesktopPanelApp({ desktopPanel = window.desktopPanel } = {
       settingsNavActiveTimer: null,
       settingsSectionFocusTimer: null,
       shortcutEscapeArmed: false,
+      pendingInlineConfirm: null,
+      inlineConfirmTimer: null,
+      updateInfo: null,
+      updateChecking: false,
+      updateInstalling: false,
       pendingEditOriginalIconUrl: "",
       iconPickers: {
         add: createIconPickerState({
@@ -122,6 +135,9 @@ export function createDesktopPanelApp({ desktopPanel = window.desktopPanel } = {
       app.bindDragBand();
       app.renderIconSuggestions("add");
       app.renderIconSuggestions("edit");
+      setTimeout(() => {
+        void app.checkForUpdates?.({ silent: true });
+      }, 1200);
       return app;
     },
     app
@@ -145,6 +161,7 @@ function createRefs() {
     batchSelectAllButton: document.querySelector("#batchSelectAllButton"),
     batchMoveButton: document.querySelector("#batchMoveButton"),
     batchResizeButton: document.querySelector("#batchResizeButton"),
+    batchRefreshIconsButton: document.querySelector("#batchRefreshIconsButton"),
     batchDeleteButton: document.querySelector("#batchDeleteButton"),
     batchClearButton: document.querySelector("#batchClearButton"),
     groupsContainer: document.querySelector("#groups"),
@@ -175,6 +192,8 @@ function createRefs() {
     customThemeAccent2Input: document.querySelector("#customThemeAccent2Input"),
     customThemeSurfaceInput: document.querySelector("#customThemeSurfaceInput"),
     panelOpacityInput: document.querySelector("#panelOpacityInput"),
+    reduceMotionInput: document.querySelector("#reduceMotionInput"),
+    highContrastFocusInput: document.querySelector("#highContrastFocusInput"),
     fontFamilySelect: document.querySelector("#fontFamilySelect"),
     textColorInput: document.querySelector("#textColorInput"),
     appearanceHint: document.querySelector("#appearanceHint"),
@@ -215,7 +234,22 @@ function createRefs() {
     exportDataButton: document.querySelector("#exportDataButton"),
     importDataButton: document.querySelector("#importDataButton"),
     autoGroupButton: document.querySelector("#autoGroupButton"),
-    closeWindowButton: document.querySelector("#closeWindow"),
+    dataActionStatus: document.querySelector("#dataActionStatus"),
+    organizeGroupSelect: document.querySelector("#organizeGroupSelect"),
+    sortGroupByNameButton: document.querySelector("#sortGroupByNameButton"),
+    sortAllGroupsByNameButton: document.querySelector("#sortAllGroupsByNameButton"),
+    compactGroupButton: document.querySelector("#compactGroupButton"),
+    findDuplicateItemsButton: document.querySelector("#findDuplicateItemsButton"),
+    suggestGroupsButton: document.querySelector("#suggestGroupsButton"),
+    organizeStatus: document.querySelector("#organizeStatus"),
+    clearIconFailuresButton: document.querySelector("#clearIconFailuresButton"),
+    iconResourceSummary: document.querySelector("#iconResourceSummary"),
+    iconResourceStatus: document.querySelector("#iconResourceStatus"),
+    appVersionLabel: document.querySelector("#appVersionLabel"),
+    checkUpdatesButton: document.querySelector("#checkUpdatesButton"),
+    installUpdateButton: document.querySelector("#installUpdateButton"),
+    copyFeedbackSummaryButton: document.querySelector("#copyFeedbackSummaryButton"),
+    feedbackSummaryStatus: document.querySelector("#feedbackSummaryStatus"),
     autoBackupEnabledInput: document.querySelector("#autoBackupEnabledInput"),
     backupRetentionInput: document.querySelector("#backupRetentionInput"),
     backupStatus: document.querySelector("#backupStatus"),

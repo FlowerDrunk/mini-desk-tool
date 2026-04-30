@@ -11,12 +11,15 @@
       revealDelayMs: 250,
       drawerEnabled: false,
       drawerEdge: "auto",
-      drawerDelayMs: 450
+      drawerDelayMs: 450,
+      reduceMotion: false
     },
     importResult: { canceled: true },
     exportResult: { canceled: false, filePath: "C:\\exports\\desktop-panel-backup.json" },
     backupDirectoryResult: { canceled: false, directory: "C:\\backups" },
     backupWriteError: "",
+    updateResult: { available: false },
+    updateInstallError: "",
     writtenBackups: [],
     officialUrls: {},
     iconSuggestions: {},
@@ -27,6 +30,7 @@
       closeWindow: [],
       configureGlobalShortcut: [],
       configureWindowBehavior: [],
+      checkForUpdate: [],
       chooseBackupDirectory: [],
       exportStateFile: [],
       getLaunchAtLogin: [],
@@ -41,6 +45,7 @@
       setDropAccepting: [],
       setDrawerCollapsed: [],
       setLaunchAtLogin: [],
+      installUpdate: [],
       setSnapEnabled: [],
       setWindowSize: [],
       snapAfterDrag: [],
@@ -101,6 +106,12 @@
     },
     failNextBackup(message = "backup failed") {
       state.backupWriteError = String(message || "backup failed");
+    },
+    setUpdateResult(result) {
+      state.updateResult = result || { available: false };
+    },
+    failNextUpdateInstall(message = "install failed") {
+      state.updateInstallError = String(message || "install failed");
     }
   };
 
@@ -134,7 +145,8 @@
         revealDelayMs: Number(options?.revealDelayMs || 250),
         drawerEnabled: Boolean(options?.drawerEnabled),
         drawerEdge: String(options?.drawerEdge || "auto"),
-        drawerDelayMs: Number(options?.drawerDelayMs || 450)
+        drawerDelayMs: Number(options?.drawerDelayMs || 450),
+        reduceMotion: Boolean(options?.reduceMotion)
       };
       state.calls.configureWindowBehavior.push({ ...state.windowBehavior });
       return Promise.resolve();
@@ -205,6 +217,27 @@
       state.launchAtLogin = Boolean(enabled);
       state.calls.setLaunchAtLogin.push(Boolean(enabled));
       return Promise.resolve(state.launchAtLogin);
+    },
+    checkForUpdate() {
+      state.calls.checkForUpdate.push(true);
+      if (state.updateResult instanceof Error) {
+        return Promise.reject(state.updateResult);
+      }
+      return Promise.resolve(state.updateResult);
+    },
+    async installUpdate(onProgress) {
+      state.calls.installUpdate.push(true);
+      if (state.updateInstallError) {
+        const error = state.updateInstallError;
+        state.updateInstallError = "";
+        throw new Error(error);
+      }
+      if (typeof onProgress === "function") {
+        onProgress({ event: "Started", data: { contentLength: 100 } });
+        onProgress({ event: "Progress", data: { chunkLength: 50 } });
+        onProgress({ event: "Finished" });
+      }
+      return true;
     },
     setSnapEnabled(enabled) {
       state.calls.setSnapEnabled.push(Boolean(enabled));

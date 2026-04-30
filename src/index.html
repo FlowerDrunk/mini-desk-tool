@@ -37,6 +37,7 @@
         </select>
         <button id="batchMoveButton" type="button">移动</button>
         <button id="batchResizeButton" type="button">改大小</button>
+        <button id="batchRefreshIconsButton" type="button">刷图标</button>
         <button id="batchDeleteButton" type="button">删除</button>
         <button id="batchClearButton" type="button">取消</button>
       </section>
@@ -191,6 +192,16 @@
         </label>
         <p id="appearanceHint" class="field-hint">当前主题会影响搜索框、工具条和图标选中高亮。</p>
 
+        <label class="checkbox">
+          <input id="reduceMotionInput" name="reduceMotion" type="checkbox" />
+          减少动效
+        </label>
+
+        <label class="checkbox">
+          <input id="highContrastFocusInput" name="highContrastFocus" type="checkbox" />
+          增强焦点对比
+        </label>
+
         <label>
           字体
           <select id="fontFamilySelect" name="fontFamily">
@@ -227,7 +238,7 @@
 
         <label>
           每排数量
-          <input id="trackCountInput" name="trackCount" type="range" min="1" max="4" step="1" />
+          <input id="trackCountInput" name="trackCount" type="range" min="1" max="9" step="1" />
         </label>
         <p id="trackCountHint" class="field-hint">当前每排显示 3 个图标</p>
       </section>
@@ -411,13 +422,67 @@
       <section class="settings-section" data-settings-section="data">
         <h3>数据与整理</h3>
 
-        <div class="settings-actions">
-          <button id="importDesktopButton" type="button">导入桌面</button>
-          <button id="importStartMenuButton" type="button" hidden>导入开始菜单</button>
-          <button id="exportDataButton" type="button">导出数据</button>
-          <button id="importDataButton" type="button">导入数据</button>
-          <button id="autoGroupButton" type="button">自动分组</button>
-          <button id="closeWindow" type="button">关闭窗口</button>
+        <div class="settings-subsection">
+          <div class="settings-subsection-head">
+            <strong>数据操作</strong>
+            <span>导入、导出与重排</span>
+          </div>
+
+          <div class="settings-actions">
+            <button id="importDesktopButton" type="button">导入桌面</button>
+            <button id="importStartMenuButton" type="button" hidden>导入开始菜单</button>
+            <button id="exportDataButton" type="button">导出数据</button>
+            <button id="importDataButton" type="button">导入数据</button>
+            <button id="autoGroupButton" type="button">自动分组</button>
+          </div>
+          <p id="dataActionStatus" class="field-hint">导入桌面会扫描桌面快捷方式，执行前需要二次确认。</p>
+        </div>
+
+        <div class="settings-subsection">
+          <div class="settings-subsection-head">
+            <strong>分组整理</strong>
+            <span>排序与重复提示</span>
+          </div>
+
+          <label>
+            目标分组
+            <select id="organizeGroupSelect" name="organizeGroup"></select>
+          </label>
+
+          <div class="settings-actions">
+            <button id="sortGroupByNameButton" type="button">排序本组</button>
+            <button id="sortAllGroupsByNameButton" type="button">排序全部</button>
+            <button id="compactGroupButton" type="button">紧凑本组</button>
+            <button id="findDuplicateItemsButton" type="button">检测重复项</button>
+            <button id="suggestGroupsButton" type="button">生成建议</button>
+          </div>
+          <p id="organizeStatus" class="field-hint">整理操作只调整顺序或给出建议，不会删除图标。</p>
+        </div>
+
+        <div class="settings-subsection">
+          <div class="settings-subsection-head">
+            <strong>图标资源</strong>
+            <span id="iconResourceSummary">暂无失败记录</span>
+          </div>
+
+          <div class="settings-actions">
+            <button id="clearIconFailuresButton" type="button">清理失败记录</button>
+          </div>
+          <p id="iconResourceStatus" class="field-hint">清理失败记录不会删除自定义图标。</p>
+        </div>
+
+        <div class="settings-subsection">
+          <div class="settings-subsection-head">
+            <strong>关于与更新</strong>
+            <span id="appVersionLabel">当前版本 --</span>
+          </div>
+
+          <div class="settings-actions">
+            <button id="checkUpdatesButton" type="button">检查更新</button>
+            <button id="installUpdateButton" type="button" hidden>立即安装</button>
+            <button id="copyFeedbackSummaryButton" type="button">复制反馈摘要</button>
+          </div>
+          <p id="feedbackSummaryStatus" class="field-hint">可手动检查 GitHub Releases 更新；反馈摘要不会包含图标、路径、备份内容或配置数据。</p>
         </div>
       </section>
 
@@ -512,6 +577,7 @@
   <div id="itemContextMenu" class="context-menu" hidden>
     <button type="button" data-action="edit-item"><span>编辑图标</span></button>
     <button type="button" data-action="duplicate-item"><span>复制一个</span></button>
+    <button type="button" data-action="refresh-icon"><span>刷新图标</span></button>
     <div class="menu-divider" role="separator"></div>
     <button type="button" data-action="copy-target" data-action-type="all"><span>复制链接/路径</span></button>
     <button type="button" data-action="copy-keyword" data-action-type="all"><span>复制搜索关键词</span></button>
