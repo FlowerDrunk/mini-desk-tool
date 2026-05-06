@@ -693,6 +693,12 @@ export function registerDialogFeature(app) {
       void checkForUpdates({ silent: false });
     });
     app.refs.installUpdateButton?.addEventListener("click", () => {
+      showUpdateInstallConfirm();
+    });
+    app.refs.cancelUpdateInstallButton?.addEventListener("click", () => {
+      hideUpdateInstallConfirm();
+    });
+    app.refs.confirmUpdateInstallButton?.addEventListener("click", () => {
       void installAvailableUpdate();
     });
     app.refs.copyFeedbackSummaryButton?.addEventListener("click", () => {
@@ -1480,6 +1486,20 @@ export function registerDialogFeature(app) {
       app.refs.installUpdateButton.disabled = !!app.runtime.updateInstalling;
       app.refs.installUpdateButton.textContent = app.runtime.updateInstalling ? "安装中..." : "立即安装";
     }
+    if (app.refs.updateInstallConfirm) {
+      const visible = !!app.runtime.updateInstallConfirmVisible && !!app.runtime.updateInfo?.available && !app.runtime.updateInstalling;
+      app.refs.updateInstallConfirm.hidden = !visible;
+    }
+    if (app.refs.updateInstallConfirmMessage && app.runtime.updateInfo?.available) {
+      const version = app.runtime.updateInfo.version ? ` v${app.runtime.updateInfo.version}` : "";
+      const notes = app.runtime.updateInfo.notes ? `\n${String(app.runtime.updateInfo.notes).slice(0, 120)}` : "";
+      app.refs.updateInstallConfirmMessage.textContent =
+        `将下载并安装新版本${version}。安装时当前应用会退出，请先保存正在编辑的内容。${notes}`;
+    }
+    if (app.refs.confirmUpdateInstallButton) {
+      app.refs.confirmUpdateInstallButton.disabled = !!app.runtime.updateInstalling;
+      app.refs.confirmUpdateInstallButton.textContent = app.runtime.updateInstalling ? "安装中..." : "下载并安装";
+    }
     if (app.refs.feedbackSummaryStatus) {
       app.refs.feedbackSummaryStatus.textContent = getUpdateStatusText();
     }
@@ -1527,8 +1547,10 @@ export function registerDialogFeature(app) {
           }
         : { available: false, checked: true };
       if (app.runtime.updateInfo.available) {
+        hideUpdateInstallConfirm();
         app.showDragToast(`发现新版本 v${app.runtime.updateInfo.version || ""}`.trim());
       } else if (!silent) {
+        hideUpdateInstallConfirm();
         app.showDragToast("当前已是最新版本");
       }
     } catch (error) {
@@ -1544,6 +1566,7 @@ export function registerDialogFeature(app) {
       } else {
         app.reportIssue?.("检查更新失败", formattedError);
       }
+      hideUpdateInstallConfirm();
     } finally {
       app.runtime.updateChecking = false;
       updateReleaseFields();
@@ -1552,13 +1575,23 @@ export function registerDialogFeature(app) {
     return app.runtime.updateInfo;
   }
 
+  function showUpdateInstallConfirm() {
+    if (!app.runtime.updateInfo?.available || app.runtime.updateInstalling) return;
+    app.runtime.updateInstallConfirmVisible = true;
+    updateReleaseFields();
+    app.refs.confirmUpdateInstallButton?.focus();
+  }
+
+  function hideUpdateInstallConfirm() {
+    app.runtime.updateInstallConfirmVisible = false;
+    updateReleaseFields();
+  }
+
   async function installAvailableUpdate() {
     if (!app.runtime.updateInfo?.available || app.runtime.updateInstalling) return;
-    const version = app.runtime.updateInfo.version ? ` v${app.runtime.updateInfo.version}` : "";
-    const confirmed = window.confirm?.(`发现新版本${version}，是否现在下载并安装？安装时应用会退出。`);
-    if (!confirmed) return;
 
     app.runtime.updateInstalling = true;
+    app.runtime.updateInstallConfirmVisible = false;
     updateReleaseFields();
 
     try {
@@ -1735,6 +1768,13 @@ export function registerDialogFeature(app) {
       event.preventDefault();
       event.stopPropagation();
       hideMenus();
+      return;
+    }
+
+    if (app.runtime.updateInstallConfirmVisible) {
+      event.preventDefault();
+      event.stopPropagation();
+      hideUpdateInstallConfirm();
       return;
     }
 

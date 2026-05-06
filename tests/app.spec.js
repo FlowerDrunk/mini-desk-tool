@@ -981,7 +981,7 @@ test("shows release info, checks updates, installs updates, and copies a privacy
   });
 
   await openSettings(page);
-  await expect(page.locator("#appVersionLabel")).toHaveText("当前版本 v1.2.2");
+  await expect(page.locator("#appVersionLabel")).toHaveText("当前版本 v1.2.3");
 
   await page.evaluate(() => {
     window.__desktopPanelMock.setUpdateResult({ available: false, checked: true });
@@ -992,23 +992,26 @@ test("shows release info, checks updates, installs updates, and copies a privacy
   await page.evaluate(() => {
     window.__desktopPanelMock.setUpdateResult({
       available: true,
-      version: "1.2.3",
+      version: "1.2.4",
       notes: "自动更新测试版本"
     });
   });
   await page.click("#checkUpdatesButton");
-  await expect(page.locator("#feedbackSummaryStatus")).toContainText("发现新版本 v1.2.3");
+  await expect(page.locator("#feedbackSummaryStatus")).toContainText("发现新版本 v1.2.4");
   await expect(page.locator("#installUpdateButton")).toBeVisible();
 
-  page.once("dialog", (dialog) => dialog.accept());
   await page.click("#installUpdateButton");
+  await expect(page.locator("#updateInstallConfirm")).toBeVisible();
+  await expect(page.locator("#updateInstallConfirmMessage")).toContainText("新版本 v1.2.4");
+  await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.installUpdate.length)).toBe(0);
+  await page.click("#confirmUpdateInstallButton");
   await expect.poll(() => page.evaluate(() => window.__desktopPanelMock.state.calls.installUpdate.length)).toBe(1);
   await expect(page.locator("#feedbackSummaryStatus")).toContainText("下载完成");
 
   await page.click("#copyFeedbackSummaryButton");
   const summary = await page.evaluate(() => window.__copiedText);
   expect(summary).toContain("Mini Desk Tool 反馈摘要");
-  expect(summary).toContain("版本：v1.2.2");
+  expect(summary).toContain("版本：v1.2.3");
   expect(summary).toContain('"drawerModeEnabled": true');
   expect(summary).not.toContain("Secret.exe");
   expect(summary).not.toContain("Private Group");

@@ -2,7 +2,7 @@
 
 Mini Desk Tool 是一个基于 Tauri 的 Windows 桌面悬浮启动面板。它面向常用网站、本地文件、文件夹、应用程序和快捷方式管理，让桌面边缘成为一个轻量、可整理、可快速唤出的 Launchpad。
 ![Tauri](https://img.shields.io/badge/Tauri-2.x-24C8DB)
-![Version](https://img.shields.io/badge/version-1.2.2-6B7CFF)
+![Version](https://img.shields.io/badge/version-1.2.3-6B7CFF)
 
 ## 特性
 

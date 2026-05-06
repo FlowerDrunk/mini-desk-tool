@@ -44,7 +44,7 @@ if (!fs.existsSync(signaturePath)) {
   process.exit(1);
 }
 
-const signature = fs.readFileSync(signaturePath, "utf8").trim();
+const signature = normalizeUpdaterSignature(signaturePath);
 if (!signature) {
   console.error(`Signature is empty: ${signaturePath}`);
   process.exit(1);
@@ -66,3 +66,16 @@ fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
 console.log(`Generated updater manifest: ${outputPath}`);
+
+function normalizeUpdaterSignature(filePath) {
+  const raw = fs.readFileSync(filePath, "utf8").trim();
+  if (!raw) return "";
+
+  if (/^untrusted comment:/i.test(raw)) {
+    const encoded = Buffer.from(`${raw}\n`, "utf8").toString("base64");
+    fs.writeFileSync(filePath, `${encoded}\n`, "utf8");
+    return encoded;
+  }
+
+  return raw.replace(/\s+/g, "");
+}

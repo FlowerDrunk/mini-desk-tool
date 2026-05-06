@@ -98,6 +98,7 @@ function validateStrictUpdaterArtifacts({ expected, installerName, releaseAssetN
   const signature = fs.readFileSync(signaturePath, "utf8").trim();
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   const platform = manifest.platforms?.["windows-x86_64"];
+  const manifestSignature = String(platform?.signature || "").trim();
 
   if (String(manifest.version || "").replace(/^v/i, "") !== expected) {
     console.error("Release check failed: latest.json version does not match package version.");
@@ -109,8 +110,19 @@ function validateStrictUpdaterArtifacts({ expected, installerName, releaseAssetN
     process.exit(1);
   }
 
-  if (!platform?.signature || platform.signature !== signature) {
+  if (!manifestSignature || manifestSignature !== signature) {
     console.error("Release check failed: latest.json signature does not match the .sig file.");
+    process.exit(1);
+  }
+
+  if (/^untrusted comment:/i.test(manifestSignature) || /\s/.test(manifestSignature)) {
+    console.error("Release check failed: updater signature must be a single base64-encoded line, not raw minisign text.");
+    process.exit(1);
+  }
+
+  const decodedSignature = Buffer.from(manifestSignature, "base64").toString("utf8");
+  if (!decodedSignature.startsWith("untrusted comment:")) {
+    console.error("Release check failed: updater signature does not decode to a minisign signature.");
     process.exit(1);
   }
 }

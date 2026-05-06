@@ -483,6 +483,16 @@
             <button id="copyFeedbackSummaryButton" type="button">复制反馈摘要</button>
           </div>
           <p id="feedbackSummaryStatus" class="field-hint">可手动检查 GitHub Releases 更新；反馈摘要不会包含图标、路径、备份内容或配置数据。</p>
+          <div id="updateInstallConfirm" class="update-install-confirm" hidden role="alertdialog" aria-labelledby="updateInstallConfirmTitle" aria-describedby="updateInstallConfirmMessage">
+            <div>
+              <strong id="updateInstallConfirmTitle">准备安装更新</strong>
+              <p id="updateInstallConfirmMessage">下载完成后，Windows 安装流程会自动退出当前应用。</p>
+            </div>
+            <div class="update-install-actions">
+              <button id="cancelUpdateInstallButton" type="button">稍后</button>
+              <button id="confirmUpdateInstallButton" type="button">下载并安装</button>
+            </div>
+          </div>
         </div>
       </section>
 
